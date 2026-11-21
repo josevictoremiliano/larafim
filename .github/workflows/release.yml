@@ -87,7 +87,7 @@ jobs:
           "sums=$((Resolve-Path "$dir/SHA256SUMS.txt").Path)" >> $env:GITHUB_OUTPUT
 
       - name: Atestação de origem
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ steps.files.outputs.installer }}
 
