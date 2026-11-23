@@ -934,9 +934,11 @@ pub const LARAVEL_PHP: [&str; 3] = ["8.3", "8.4", "8.5"];
 fn kit_package(kit: &str) -> Option<&'static str> {
     match kit {
         "none" => Some("laravel/laravel:^13.0"),
-        "react" => Some("laravel/react-starter-kit"),
-        "vue" => Some("laravel/vue-starter-kit"),
-        "livewire" => Some("laravel/livewire-starter-kit"),
+        // Os releases marcados dos starter kits ainda são Laravel 12; o
+        // instalador oficial usa o dev-main, que já é Laravel 13.
+        "react" => Some("laravel/react-starter-kit:dev-main"),
+        "vue" => Some("laravel/vue-starter-kit:dev-main"),
+        "livewire" => Some("laravel/livewire-starter-kit:dev-main"),
         _ => None,
     }
 }
