@@ -66,14 +66,17 @@
   let storageKey = $state(0);
   let redisKey = $state(0);
   let redisBusy = $state(false);
+  let installingPredis = $state(false);
 
   // Redis do Larafim nas filas do projeto: mostra o que muda no .env antes.
   async function chooseRedis(kind: string) {
     if (!project) return;
     const p = project;
+    const connection = kind === "redis" ? "redis" : "none";
+    redisBusy = true;
     try {
-      if (kind === "redis") {
-        const pv = await redis.queuePreview(p.path);
+      const pv = await redis.queuePreview(p.path, connection);
+      if (connection === "redis") {
         if (!pv.configured) {
           error = t("Adicione o Redis em Configurações › Serviços.");
           redisKey++;
@@ -90,29 +93,35 @@
             redisKey++;
             return;
           }
-          redisBusy = true;
+          installingPredis = true;
           try {
             await redis.installPredis(p.path);
           } finally {
-            redisBusy = false;
+            installingPredis = false;
           }
         }
-        const lines = pv.diff.map((d) => `${d.key}: ${d.before ?? "—"} → ${d.after ?? t("(comentada)")}`).join("\n");
-        const ok = await confirm(
-          t("Usar o Redis do Larafim nas filas deste projeto?") +
-            (lines ? "\n\n" + t("Mudanças no .env (com cópia em .env.larafim.bak):") + "\n" + lines : ""),
-          "Redis",
-          t("Aplicar"),
-        );
-        if (!ok) {
-          redisKey++;
-          return;
-        }
       }
-      await redis.queueConnection(p.path, kind === "redis" ? "redis" : "database");
+      const message = connection === "redis"
+        ? t("Usar o Redis do Larafim nas filas deste projeto?")
+        : pv.has_snapshot
+          ? t("Restaurar a configuração anterior da fila e do Redis neste projeto?")
+          : t("Os valores anteriores da fila e do Redis não foram guardados. Deixar de gerenciar o Redis sem editar o .env?");
+      const lines = pv.diff.map((d) => `${d.key}: ${d.before ?? "—"} → ${d.after ?? t("(comentada)")}`).join("\n");
+      const ok = await confirm(
+        message + (lines ? "\n\n" + t("Mudanças no .env (com cópia em .env.larafim.bak):") + "\n" + lines : ""),
+        "Redis",
+        t("Aplicar"),
+      );
+      if (!ok) {
+        redisKey++;
+        return;
+      }
+      await redis.queueConnection(p.path, connection);
     } catch (e) {
       error = String(e);
       redisKey++;
+    } finally {
+      redisBusy = false;
     }
   }
 
@@ -577,7 +586,7 @@
               </div>
             {/key}
           </div>
-          {#if redisBusy}<InstallProgress path={project.path} label={t("Instalando predis/predis…")} />{/if}
+          {#if installingPredis}<InstallProgress path={project.path} label={t("Instalando predis/predis…")} />{/if}
         {/if}
       </div>
     {/if}

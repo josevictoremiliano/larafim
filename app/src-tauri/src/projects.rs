@@ -118,6 +118,7 @@ pub fn save_project(app: AppHandle, state: State<'_, AppState>, config: ProjectC
         config.reverb_port = existing.and_then(|p| p.reverb_port);
         config.queues = existing.map(|p| p.queues.clone()).unwrap_or_default();
         config.queue_connection = existing.and_then(|p| p.queue_connection.clone());
+        config.queue_redis_env = existing.and_then(|p| p.queue_redis_env.clone());
         // A interface ainda não edita aliases: preserve os do projects.toml.
         if config.aliases.is_empty() {
             config.aliases = existing.map(|p| p.aliases.clone()).unwrap_or_default();
@@ -194,6 +195,7 @@ pub fn inspect_folder(state: State<'_, AppState>, path: PathBuf) -> CmdResult<Fo
             reverb_port: None,
             queues: Vec::new(),
             queue_connection: None,
+            queue_redis_env: None,
             online: false,
         },
         view_kind: d.kind,

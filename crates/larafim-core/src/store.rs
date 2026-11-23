@@ -60,6 +60,9 @@ pub struct ProjectConfig {
     /// Conexão do worker de fila: "redis" (Redis do Larafim). Vazio = a do `.env`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_connection: Option<String>,
+    /// Valores anteriores do `.env`, cifrados com a DPAPI antes de gravar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_redis_env: Option<String>,
     /// Intenção de deixar online (usado a partir da fase 3).
     #[serde(default)]
     pub online: bool,
@@ -353,7 +356,7 @@ impl ProjectConfig {
         for alias in &self.aliases {
             let label = alias.trim().trim_end_matches('.').to_lowercase();
             let label = label.strip_suffix(&suffix).unwrap_or(&label);
-            if label.is_empty() {
+            if validate_alias(label).is_err() {
                 continue;
             }
             let host = format!("{label}.{tld}");
@@ -384,6 +387,7 @@ fn default_config(d: &DetectedProject, domain: String) -> ProjectConfig {
         reverb_port: None,
         queues: Vec::new(),
         queue_connection: None,
+        queue_redis_env: None,
         online: false,
     }
 }
@@ -461,6 +465,10 @@ pub const MAX_ALIASES: usize = 20;
 
 /// Alias: rótulos de domínio separados por ponto (`finder.noveck`).
 pub fn validate_alias(alias: &str) -> Result<()> {
+    // O gateway reserva esses prefixos para os serviços locais.
+    if matches!(alias.split('.').next(), Some("db" | "mail" | "s3")) {
+        return Err(Error::Invalid(crate::t!("domínio extra \"{a}\" reservado para um serviço do Larafim", a = alias)));
+    }
     let ok = alias.len() <= 200
         && alias.split('.').all(|l| {
             !l.is_empty()
@@ -476,6 +484,17 @@ pub fn validate_alias(alias: &str) -> Result<()> {
             "domínio extra \"{a}\" inválido: use letras minúsculas, números, hífen e ponto",
             a = alias
         )))
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn aliases_reject_reserved_service_names() {
+    for alias in ["db", "db.algo", "mail", "mail.algo", "s3", "s3.algo"] {
+        assert!(validate_alias(alias).is_err(), "{alias}");
+    }
+    for alias in ["db-algo", "app.db", "mailbox", "s3-cache"] {
+        assert!(validate_alias(alias).is_ok(), "{alias}");
     }
 }
 
@@ -608,7 +627,7 @@ mod tests {
         };
         let mut cfg = default_config(&d, "finder".into());
         assert!(cfg.alias_hosts("local").is_empty());
-        cfg.aliases = vec![" Finder.Noveck ".into(), "finder.hubbi.local".into(), "finder".into(), "".into(), "finder.noveck".into()];
+        cfg.aliases = vec![" Finder.Noveck ".into(), "finder.hubbi.local".into(), "finder".into(), "".into(), "finder.noveck".into(), "DB.Reservado.local".into(), "mail".into()];
         assert_eq!(cfg.alias_hosts("local"), vec!["finder.noveck.local".to_string(), "finder.hubbi.local".to_string()]);
     }
 

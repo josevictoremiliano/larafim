@@ -19,3 +19,5 @@ Thumbs.db
 .gemini/*
 .kiro/*
 .codebrain/*
+.mcp.json
+.vscode/*

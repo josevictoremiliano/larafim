@@ -29,6 +29,8 @@ Ele **nunca cria nem altera** esses arquivos.
 No painel à direita da janela principal:
 
 - **Domínio:** o endereço `<domínio>.offline`. Só aceita letras minúsculas, números e hífen.
+- **Domínios extras:** apontam para o mesmo projeto. `db`, `mail`, `s3` e seus subdomínios são
+  reservados para Adminer, Mailpit e RustFS.
 - **Versão do PHP:** automática (a mais nova compatível com o que o projeto pede) ou fixa num minor
   (`8.4`). Fixar o minor faz o projeto acompanhar as atualizações de patch (8.4.10 → 8.4.12).
 - **Pasta pública:** de onde os arquivos são servidos (`public/`, raiz…).

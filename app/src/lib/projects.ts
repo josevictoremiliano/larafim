@@ -150,6 +150,10 @@ export function mockSetProjectOnline(path: string, online: boolean) {
   mockEmit("projects-changed", mockOverview());
 }
 
+export function mockSetProjectQueueConnection(path: string, queue_connection: string | null) {
+  mockChange(() => (mockProjects = mockProjects.map((p) => (p.path === path ? { ...p, queue_connection } : p))));
+}
+
 function mockOverview(): ProjectsOverview {
   const projects = mockConfig.roots.length ? mockProjects : mockProjects.filter((p) => p.root === null);
   return { projects: projects.map((p) => ({ ...p })), ignored: [...mockIgnored] };

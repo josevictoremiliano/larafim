@@ -117,7 +117,7 @@ struct Progress {
     total: Option<u64>,
 }
 
-/// Baixa o Redis nativo (GitHub, com SHA-256 do release).
+/// Baixa a versão fixada do Redis nativo e confere o SHA-256.
 #[tauri::command]
 pub async fn redis_install(app: AppHandle) -> CmdResult<()> {
     {
@@ -344,44 +344,131 @@ pub struct QueueRedisPreview {
     diff: Vec<DiffLine>,
     /// Projeto sem `predis/predis` (no Windows não há a extensão phpredis).
     needs_predis: bool,
+    /// Projetos marcados por versões antigas podem não ter valores guardados.
+    has_snapshot: bool,
+}
+
+fn saved_env(project: &larafim_core::ProjectConfig) -> Result<Option<core_redis::EnvSnapshot>, String> {
+    project.queue_redis_env.as_deref().map(|protected| {
+        let json = crate::secret::unprotect(protected)?;
+        serde_json::from_str(&json).map_err(|e| e.to_string())
+    }).transpose()
+}
+
+fn redis_port(app: &AppHandle, connection: &str) -> Result<Option<u16>, String> {
+    match connection {
+        "redis" => Ok(redis_config(app).map(|cfg| cfg.port)),
+        "none" => Ok(None),
+        other => Err(t!("conexão de fila desconhecida: {a}", a = other.escape_debug())),
+    }
 }
 
 #[tauri::command]
-pub fn project_queue_redis_preview(app: AppHandle, path: std::path::PathBuf) -> CmdResult<QueueRedisPreview> {
-    let Some(cfg) = redis_config(&app) else {
-        return Ok(QueueRedisPreview { configured: false, diff: Vec::new(), needs_predis: false });
+pub fn project_queue_redis_preview(app: AppHandle, path: std::path::PathBuf, connection: String) -> CmdResult<QueueRedisPreview> {
+    let port = redis_port(&app, &connection)?;
+    let state = app.state::<AppState>();
+    let store = state.projects.lock().unwrap();
+    let project = store.find(&path).ok_or_else(|| t!("importe o projeto antes"))?;
+    let changes = if connection == "redis" {
+        port.map(core_redis::env_changes).unwrap_or_default()
+    } else {
+        saved_env(project)?.as_ref().map(core_redis::restore_env).unwrap_or_default()
     };
-    let base = std::fs::read_to_string(envfile::env_path(&path)).unwrap_or_default();
+    let mut diff = if envfile::env_path(&project.path).is_file() {
+        envfile::preview(&project.path, &changes).map_err(|e| e.to_string())?
+    } else {
+        Vec::new()
+    };
+    for line in diff.iter_mut().filter(|d| d.key == "REDIS_PASSWORD") {
+        line.before = line.before.as_ref().map(|_| "••••".into());
+        line.after = line.after.as_ref().map(|_| "••••".into());
+    }
     Ok(QueueRedisPreview {
-        configured: true,
-        diff: envfile::apply(&base, &core_redis::env_changes(cfg.port)).1,
-        needs_predis: !core_redis::has_predis(&path),
+        configured: port.is_some(),
+        diff,
+        needs_predis: port.is_some() && !core_redis::has_predis(&project.path),
+        has_snapshot: project.queue_redis_env.is_some(),
     })
 }
 
-/// Fila do projeto no Redis do Larafim (`connection = "redis"`) ou de volta
-/// ao banco (`database`). Ajusta o `.env` com cópia e reinicia o worker.
+/// Liga o Redis para as filas ou devolve as chaves do `.env` ao estado anterior.
 #[tauri::command]
 pub async fn project_queue_connection(app: AppHandle, path: std::path::PathBuf, connection: String) -> CmdResult<()> {
-    let changes = match connection.as_str() {
-        "redis" => {
-            let cfg = redis_config(&app).ok_or_else(|| t!("adicione o Redis em Configurações › Serviços"))?;
-            if !core_redis::has_predis(&path) {
-                return Err(t!("o projeto precisa do pacote predis/predis: rode composer require predis/predis"));
-            }
-            start_redis(&app).await?;
-            core_redis::env_changes(cfg.port)
+    let port = redis_port(&app, &connection)?;
+    let state = app.state::<AppState>();
+    let path = state.projects.lock().unwrap().find(&path).ok_or_else(|| t!("importe o projeto antes"))?.path.clone();
+    if connection == "redis" {
+        if port.is_none() {
+            return Err(t!("adicione o Redis em Configurações › Serviços"));
         }
-        "database" => vec![envfile::EnvChange::set("QUEUE_CONNECTION", "database")],
-        other => return Err(t!("conexão de fila desconhecida: {a}", a = other.escape_debug())),
-    };
-    if envfile::env_path(&path).exists() {
-        envfile::write(&path, &changes).map_err(|e| e.to_string())?;
-        crate::tools::env_changed(&app, &path);
+        if !core_redis::has_predis(&path) {
+            return Err(t!("o projeto precisa do pacote predis/predis: rode composer require predis/predis"));
+        }
+        start_redis(&app).await?;
     }
-    crate::tools::update_project(&app, &path, |p| p.queue_connection = (connection == "redis").then(|| connection.clone()))?;
-    crate::tools::restart_queue_if_running(&app, &path)?;
+    {
+        let mut store = state.projects.lock().unwrap();
+        set_project_queue_connection(&mut store, &state.paths.projects_file(), &path, port)?;
+    }
+    crate::tools::env_changed(&app, &path);
+    crate::tools::notify_projects(&app);
     tracing::info!(path = %path.display(), connection, "conexão da fila alterada");
+    Ok(())
+}
+
+fn set_project_queue_connection(
+    store: &mut larafim_core::store::ProjectsFile,
+    projects_file: &std::path::Path,
+    path: &std::path::Path,
+    port: Option<u16>,
+) -> Result<(), String> {
+    let index = store.projects.iter().position(|p| larafim_core::store::same_path(&p.path, path))
+        .ok_or_else(|| t!("importe o projeto antes"))?;
+    let before = store.projects[index].clone();
+    let mut saved = saved_env(&before)?;
+    let env = envfile::env_path(path);
+    if let Some(port) = port {
+        let changes = core_redis::env_changes(port);
+        let text = match std::fs::read_to_string(&env) {
+            Ok(text) => Some(text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.to_string()),
+        };
+        // Só a primeira ativação pode criar uma cópia. Projetos legados já
+        // perderam o valor original e não podem registrar o valor aplicado.
+        if saved.is_some() || before.queue_connection.is_none() {
+            let saved = saved.get_or_insert_with(Default::default);
+            if let Some(text) = &text {
+                core_redis::remember_env(text, &changes, saved).map_err(|e| e.to_string())?;
+            }
+            let json = serde_json::to_string(saved).map_err(|e| e.to_string())?;
+            store.projects[index].queue_redis_env = Some(crate::secret::protect(&json)?);
+        }
+        store.projects[index].queue_connection = Some("redis".into());
+        // Persiste a cópia antes de alterar o `.env` para que possa ser restaurada após uma falha.
+        if let Err(e) = store.save(projects_file) {
+            store.projects[index] = before;
+            return Err(e.to_string());
+        }
+        if text.is_some() && let Err(e) = envfile::write(path, &changes) {
+            let current = std::mem::replace(&mut store.projects[index], before);
+            if let Err(rollback) = store.save(projects_file) {
+                store.projects[index] = current;
+                return Err(format!("{e}\n{rollback}"));
+            }
+            return Err(e.to_string());
+        }
+    } else {
+        if let Some(saved) = saved {
+            envfile::write(path, &core_redis::restore_env(&saved)).map_err(|e| e.to_string())?;
+        }
+        store.projects[index].queue_connection = None;
+        store.projects[index].queue_redis_env = None;
+        if let Err(e) = store.save(projects_file) {
+            store.projects[index] = before;
+            return Err(e.to_string());
+        }
+    }
     Ok(())
 }
 

@@ -6,6 +6,7 @@
   import type { DevLog, DevStatus } from "../lib/node";
   import { php } from "../lib/php";
   import { app } from "../lib/state.svelte";
+  const LARAVEL_PHP = ["8.3", "8.4", "8.5"];
   import { toolsApi, type Created, type Kit } from "../lib/tools";
 
   // Assistente: criar um projeto Laravel novo já cadastrado no Larafim.
@@ -27,7 +28,9 @@
 
   $effect(() => {
     php.overview().then((o) => {
-      minors = o.rows.filter((r) => r.installed && Number(r.minor) >= 8.2).map((r) => r.minor);
+      // Só os PHPs que o Laravel 13 suporta; o mais novo deles vem selecionado.
+      minors = o.rows.filter((r) => r.installed && LARAVEL_PHP.includes(r.minor)).map((r) => r.minor);
+      minors.sort((a, b) => Number(b) - Number(a));
       phpMinor = minors[0] ?? "";
     });
     const stops = [
@@ -100,7 +103,7 @@
             </select>
           </div>
         </div>
-        {#if !minors.length}<p class="caption warn">{t("Instale o PHP 8.2 ou mais novo em Configurações › PHP.")}</p>{/if}
+        {#if !minors.length}<p class="caption warn">{t("O Laravel 13 precisa do PHP 8.3, 8.4 ou 8.5: instale em Configurações › PHP.")}</p>{/if}
         <div class="row">
           <span>{t("Starter kit")}</span>
           <div class="select">

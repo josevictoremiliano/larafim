@@ -48,6 +48,8 @@
   const preview = $derived(normalize(draft));
   const draftProblem = $derived.by(() => {
     if (!preview) return null;
+    if (["db", "mail", "s3"].includes(preview.split(".")[0]))
+      return t('domínio extra "{a}" reservado para um serviço do Larafim', { a: preview });
     if (preview === project.domain) return t("Esse já é o domínio principal.");
     if (project.aliases.includes(preview)) return t("Esse domínio já está na lista.");
     if (preview.split(".").some((l) => !l || l.length > 63 || l.startsWith("-") || l.endsWith("-")))
