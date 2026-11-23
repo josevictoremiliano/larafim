@@ -60,7 +60,7 @@
       list.push({ key: root, label: root, avulso: false, items: filtered.filter((p) => p.root === root) });
     }
     const loose = filtered.filter((p) => p.root === null || !(app.config?.roots ?? []).includes(p.root));
-    if (loose.length) list.push({ key: "__avulsos", label: "Projetos avulsos", avulso: true, items: loose });
+    if (loose.length) list.push({ key: "__avulsos", label: t("Projetos avulsos"), avulso: true, items: loose });
     return list;
   });
 

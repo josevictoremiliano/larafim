@@ -43,7 +43,7 @@
 
 <h1>{t("Terminal")}</h1>
 <p class="lead caption">
-  {t("Os comandos")} <span class="mono">php</span> e <span class="mono">composer</span> {t("do Larafim escolhem sozinhos a versão do PHP de cada pasta: dentro do projeto da loja, PHP 8.4; dentro do blog, PHP 8.1.")}
+  {t("Os comandos")} <span class="mono">php</span> {t("e")} <span class="mono">composer</span> {t("do Larafim escolhem sozinhos a versão do PHP de cada pasta: dentro do projeto da loja, PHP 8.4; dentro do blog, PHP 8.1.")}
 </p>
 
 {#if error}

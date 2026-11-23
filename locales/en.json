@@ -793,5 +793,9 @@
   "passou de {a} minutos e foi interrompido": "took longer than {a} minutes and was stopped",
   "o projeto não tem o arquivo artisan": "the project has no artisan file",
   "ação do Composer desconhecida": "unknown Composer action",
-  "ferramenta desconhecida": "unknown tool"
+  "ferramenta desconhecida": "unknown tool",
+  "Projetos avulsos": "Standalone projects",
+  "{v} disponível": "{v} available",
+  "minha-loja": "my-shop",
+  "e": "and"
 }

@@ -269,7 +269,7 @@
           </p>
         {:else if preview.kind === "postgres"}
           <p class="caption">
-            {t("O banco")} <span class="mono">{preview.data.database}</span> {t("será criado no PostgreSQL do Larafim (se ainda não existir), e as extensões")} <span class="mono">pgsql</span> e <span class="mono">pdo_pgsql</span> {t("serão ligadas no PHP do projeto.")}
+            {t("O banco")} <span class="mono">{preview.data.database}</span> {t("será criado no PostgreSQL do Larafim (se ainda não existir), e as extensões")} <span class="mono">pgsql</span> {t("e")} <span class="mono">pdo_pgsql</span> {t("serão ligadas no PHP do projeto.")}
           </p>
         {:else if preview.kind === "mariadb-own"}
           <p class="caption">

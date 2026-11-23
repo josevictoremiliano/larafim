@@ -97,7 +97,7 @@
     <div class="content">
       <h2 id="nl-title">{t("Novo projeto Laravel")}</h2>
       {#if key === null}
-        <label class="row"><span>{t("Nome")}</span><input class="input" bind:value={name} placeholder="minha-loja" /></label>
+        <label class="row"><span>{t("Nome")}</span><input class="input" bind:value={name} placeholder={t("minha-loja")} /></label>
         {#if slug && app.config}
           <p class="caption preview">{t("Endereço:")} <span class="mono">http://{slug}.{app.config.tld}</span></p>
         {/if}

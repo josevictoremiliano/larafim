@@ -90,7 +90,7 @@
         <div class="installed">
           {#if row.installed}
             <span class="ok"><Glyph name="check" size={12} /> {row.installed}</span>
-            {#if row.update_available}<span class="badge">{row.latest} disponível</span>{/if}
+            {#if row.update_available}<span class="badge">{t("{v} disponível", { v: row.latest ?? "" })}</span>{/if}
           {:else}
             <span class="caption">—</span>
           {/if}
@@ -120,7 +120,7 @@
     {/each}
   </div>
   <p class="tip caption">
-    {t("No terminal,")} <span class="mono">node</span>, <span class="mono">npm</span> e <span class="mono">npx</span> {t("usam a versão da pasta (Configurações › Terminal). Para forçar:")} <span class="mono">$env:LARAFIM_NODE = "22"</span>.
+    {t("No terminal,")} <span class="mono">node</span>, <span class="mono">npm</span> {t("e")} <span class="mono">npx</span> {t("usam a versão da pasta (Configurações › Terminal). Para forçar:")} <span class="mono">$env:LARAFIM_NODE = "22"</span>.
   </p>
 {:else if loading}
   <div class="loading"><ProgressBar /></div>

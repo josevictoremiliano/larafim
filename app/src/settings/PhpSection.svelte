@@ -255,7 +255,7 @@
             {#if row.installed}
               <span class="ok"><Glyph name="check" size={12} /> {row.installed}</span>
               {#if row.update_available}
-                <span class="badge">{row.latest} disponível</span>
+                <span class="badge">{t("{v} disponível", { v: row.latest ?? "" })}</span>
               {/if}
             {:else}
               <span class="caption">—</span>
