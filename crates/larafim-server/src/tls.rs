@@ -208,7 +208,7 @@ mod tests {
         let mut routes = Routes::default();
         routes.sites.insert(
             "loja.offline".into(),
-            Site { name: "loja".into(), docroot: tmp.path().to_path_buf(), php: None, php_missing: false, online: true, proxy: None },
+            Site { name: "loja".into(), docroot: tmp.path().to_path_buf(), php: None, php_missing: false, online: true, proxy: None, ws: None },
         );
         let ca = generate_ca("offline", "teste").unwrap();
         let resolver = Arc::new(SniResolver::new(&ca, "offline").unwrap());

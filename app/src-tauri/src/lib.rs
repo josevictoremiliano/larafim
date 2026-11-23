@@ -15,6 +15,7 @@ mod autostart;
 mod https;
 mod language;
 mod pg;
+mod redis;
 mod s3;
 mod service_info;
 mod services;
@@ -105,6 +106,7 @@ pub fn run() {
             projects::import_project,
             projects::import_all,
             projects::save_project,
+            projects::set_project_aliases,
             projects::remove_project,
             projects::ignore_project,
             projects::unignore_project,
@@ -174,6 +176,19 @@ pub fn run() {
             tools::worker_restart,
             tools::process_info,
             tools::has_reverb,
+            tools::project_install_reverb,
+            tools::reverb_preview,
+            tools::queues_discover,
+            tools::queues_set,
+            redis::redis_status,
+            redis::redis_install,
+            redis::redis_configure,
+            redis::redis_remove,
+            redis::redis_start,
+            redis::redis_stop,
+            redis::project_queue_redis_preview,
+            redis::project_queue_connection,
+            redis::project_install_predis,
             tools::xdebug_info,
             tools::xdebug_set,
             tools::laravel_create,

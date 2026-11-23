@@ -65,6 +65,20 @@ pub async fn list_projects(state: State<'_, AppState>) -> CmdResult<ProjectsOver
     Ok(ProjectsOverview { projects, ignored })
 }
 
+/// Define os domínios extras (aliases) do projeto e atualiza rotas e hosts.
+#[tauri::command]
+pub fn set_project_aliases(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: PathBuf,
+    aliases: Vec<String>,
+) -> CmdResult<ProjectsOverview> {
+    let tld = state.config.lock().map_err(|e| e.to_string())?.tld.clone();
+    let data = change(&app, &state, |store, _| store.set_aliases(&path, &aliases, &tld))?;
+    crate::server::after_change(&app, true);
+    Ok(data)
+}
+
 #[tauri::command]
 pub fn import_project(app: AppHandle, state: State<'_, AppState>, path: PathBuf) -> CmdResult<ProjectsOverview> {
     change(&app, &state, |store, _| store.import(&path).map(|domain| tracing::info!(domain, "projeto importado")))
@@ -101,6 +115,13 @@ pub fn save_project(app: AppHandle, state: State<'_, AppState>, config: ProjectC
         config.mail = existing.and_then(|p| p.mail.clone());
         config.storage = existing.and_then(|p| p.storage.clone());
         config.workers = existing.map(|p| p.workers.clone()).unwrap_or_default();
+        config.reverb_port = existing.and_then(|p| p.reverb_port);
+        config.queues = existing.map(|p| p.queues.clone()).unwrap_or_default();
+        config.queue_connection = existing.and_then(|p| p.queue_connection.clone());
+        // A interface ainda não edita aliases: preserve os do projects.toml.
+        if config.aliases.is_empty() {
+            config.aliases = existing.map(|p| p.aliases.clone()).unwrap_or_default();
+        }
     }
     let data = change(&app, &state, |store, _| store.upsert(config))?;
     crate::server::after_change(&app, true);
@@ -148,6 +169,7 @@ pub struct FolderProposal {
 
 #[tauri::command]
 pub fn inspect_folder(state: State<'_, AppState>, path: PathBuf) -> CmdResult<FolderProposal> {
+    let path = larafim_core::projects::project_root(&path);
     let d = detect_any(&path).ok_or_else(|| t!("a pasta {a} não existe", a = path.display()))?;
     let parent = path.parent().map(PathBuf::from).unwrap_or_default();
     let recognized = larafim_core::projects::detect(&path, &parent).is_some();
@@ -157,6 +179,7 @@ pub fn inspect_folder(state: State<'_, AppState>, path: PathBuf) -> CmdResult<Fo
         config: ProjectConfig {
             path: path.clone(),
             domain: larafim_core::store::unique_domain(&d.domain, &used),
+            aliases: Vec::new(),
             php: None,
             docroot: d.docroot.clone(),
             node: d.kind == larafim_core::ProjectKind::Node && d.node_command.is_some(),
@@ -168,6 +191,9 @@ pub fn inspect_folder(state: State<'_, AppState>, path: PathBuf) -> CmdResult<Fo
             mail: None,
             storage: None,
             workers: Vec::new(),
+            reverb_port: None,
+            queues: Vec::new(),
+            queue_connection: None,
             online: false,
         },
         view_kind: d.kind,

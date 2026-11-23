@@ -15,6 +15,10 @@ pub struct ProjectConfig {
     pub path: PathBuf,
     /// Rótulo do domínio, sem o TLD (`loja` → `loja.offline`).
     pub domain: String,
+    /// Domínios extras do mesmo projeto, sem o TLD (`finder.noveck` →
+    /// `finder.noveck.local`). Útil para white-label/multi-tenant por host.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
     /// Minor do PHP fixado ("8.3"). Vazio = automático (mais novo compatível).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub php: Option<String>,
@@ -47,6 +51,15 @@ pub struct ProjectConfig {
     /// Workers do Laravel ligados junto com o projeto: "queue", "schedule", "reverb".
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workers: Vec<String>,
+    /// Porta do Reverb do projeto (escolhida pelo Larafim, sem repetir entre projetos).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reverb_port: Option<u16>,
+    /// Filas que o worker processa (`--queue=a,b`). Vazio = descobrir ao ligar.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queues: Vec<String>,
+    /// Conexão do worker de fila: "redis" (Redis do Larafim). Vazio = a do `.env`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_connection: Option<String>,
     /// Intenção de deixar online (usado a partir da fase 3).
     #[serde(default)]
     pub online: bool,
@@ -81,6 +94,8 @@ pub struct ProjectView {
     pub kind: ProjectKind,
     pub status: ProjectStatus,
     pub domain: String,
+    /// Domínios extras (sem o TLD).
+    pub aliases: Vec<String>,
     pub docroot: String,
     /// Minor fixado; `None` = automático.
     pub php_pin: Option<String>,
@@ -98,6 +113,9 @@ pub struct ProjectView {
     pub mail: Option<String>,
     pub storage: Option<String>,
     pub workers: Vec<String>,
+    pub reverb_port: Option<u16>,
+    pub queues: Vec<String>,
+    pub queue_connection: Option<String>,
     pub online: bool,
 }
 
@@ -241,6 +259,15 @@ impl ProjectsFile {
         if cfg.workers.iter().any(|w| !["queue", "schedule", "reverb"].contains(&w.as_str())) {
             return Err(Error::Invalid(crate::t!("worker desconhecido")));
         }
+        if cfg.reverb_port.is_some_and(|p| !crate::reverb::PORTS.contains(&p)) {
+            return Err(Error::Invalid(crate::t!("porta do Reverb inválida")));
+        }
+        if cfg.queues.len() > crate::queues::MAX_QUEUES || cfg.queues.iter().any(|q| !crate::safety::is_queue_name(q)) {
+            return Err(Error::Invalid(crate::t!("nome de fila inválido")));
+        }
+        if cfg.queue_connection.as_deref().is_some_and(|c| c != "redis") {
+            return Err(Error::Invalid(crate::t!("conexão de fila desconhecida")));
+        }
         if cfg.node && cfg.node_command.is_none() {
             return Err(Error::Invalid(crate::t!("informe o comando do Node (ex.: npm run dev)")));
         }
@@ -255,6 +282,48 @@ impl ProjectsFile {
 
     /// Tira o projeto do Larafim (os arquivos ficam intactos). Se ele estiver
     /// numa pasta raiz, passa a ser ignorado para não voltar como "novo".
+    /// Define os domínios extras de um projeto (substitui a lista inteira).
+    /// Cada alias é um ou mais rótulos separados por ponto, sem o TLD
+    /// (`finder.noveck`). Recusa repetidos e nomes já usados por outro projeto.
+    pub fn set_aliases(&mut self, path: &Path, aliases: &[String], tld: &str) -> Result<()> {
+        let suffix = format!(".{tld}");
+        let mut clean: Vec<String> = Vec::new();
+        for raw in aliases {
+            let mut alias = raw.trim().trim_end_matches('.').to_lowercase();
+            if let Some(rest) = alias.strip_suffix(&suffix) {
+                alias = rest.to_string();
+            }
+            if alias.is_empty() {
+                continue;
+            }
+            validate_alias(&alias)?;
+            if clean.contains(&alias) {
+                continue;
+            }
+            clean.push(alias);
+        }
+        if clean.len() > MAX_ALIASES {
+            return Err(Error::Invalid(crate::t!("no máximo {a} domínios extras por projeto", a = MAX_ALIASES)));
+        }
+        let Some(index) = self.projects.iter().position(|p| same_path(&p.path, path)) else {
+            return Err(Error::Invalid(crate::t!("projeto {a} não está importado", a = path.display())));
+        };
+        let own = &self.projects[index].domain;
+        if let Some(a) = clean.iter().find(|a| *a == own) {
+            return Err(Error::Invalid(crate::t!("\"{a}\" já é o domínio principal deste projeto", a = a)));
+        }
+        for (i, other) in self.projects.iter().enumerate() {
+            if i == index {
+                continue;
+            }
+            if let Some(a) = clean.iter().find(|a| **a == other.domain || other.aliases.iter().any(|o| o.eq_ignore_ascii_case(a))) {
+                return Err(Error::Invalid(crate::t!("o domínio \"{a}\" já é usado por outro projeto", a = a)));
+            }
+        }
+        self.projects[index].aliases = clean;
+        Ok(())
+    }
+
     pub fn remove(&mut self, path: &Path, roots: &[PathBuf]) {
         self.projects.retain(|p| !same_path(&p.path, path));
         if under_root(path, roots).is_some() && !self.is_ignored(path) {
@@ -274,10 +343,33 @@ impl ProjectsFile {
     }
 }
 
+impl ProjectConfig {
+    /// Hosts completos dos aliases (`<alias>.<tld>`), normalizados, sem
+    /// repetir o domínio principal. Aceita o alias com ou sem o TLD.
+    pub fn alias_hosts(&self, tld: &str) -> Vec<String> {
+        let main = format!("{}.{tld}", self.domain);
+        let suffix = format!(".{tld}");
+        let mut out: Vec<String> = Vec::new();
+        for alias in &self.aliases {
+            let label = alias.trim().trim_end_matches('.').to_lowercase();
+            let label = label.strip_suffix(&suffix).unwrap_or(&label);
+            if label.is_empty() {
+                continue;
+            }
+            let host = format!("{label}.{tld}");
+            if host != main && !out.contains(&host) {
+                out.push(host);
+            }
+        }
+        out
+    }
+}
+
 fn default_config(d: &DetectedProject, domain: String) -> ProjectConfig {
     ProjectConfig {
         path: d.path.clone(),
         domain,
+        aliases: Vec::new(),
         php: None,
         docroot: d.docroot.clone(),
         node: d.kind == ProjectKind::Node && d.node_command.is_some(),
@@ -289,6 +381,9 @@ fn default_config(d: &DetectedProject, domain: String) -> ProjectConfig {
         mail: None,
         storage: None,
         workers: Vec::new(),
+        reverb_port: None,
+        queues: Vec::new(),
+        queue_connection: None,
         online: false,
     }
 }
@@ -301,6 +396,7 @@ fn view_from(d: &DetectedProject, root: Option<PathBuf>, cfg: &ProjectConfig) ->
         kind: d.kind,
         status: ProjectStatus::New,
         domain: cfg.domain.clone(),
+        aliases: cfg.aliases.clone(),
         docroot: cfg.docroot.clone(),
         php_pin: cfg.php.clone(),
         php_request: d.php.clone(),
@@ -315,6 +411,9 @@ fn view_from(d: &DetectedProject, root: Option<PathBuf>, cfg: &ProjectConfig) ->
         mail: cfg.mail.clone(),
         storage: cfg.storage.clone(),
         workers: cfg.workers.clone(),
+        reverb_port: cfg.reverb_port,
+        queues: cfg.queues.clone(),
+        queue_connection: cfg.queue_connection.clone(),
         online: cfg.online,
     }
 }
@@ -327,6 +426,7 @@ fn missing_view(cfg: &ProjectConfig, root: Option<PathBuf>) -> ProjectView {
         kind: ProjectKind::Php,
         status: ProjectStatus::Missing,
         domain: cfg.domain.clone(),
+        aliases: cfg.aliases.clone(),
         docroot: cfg.docroot.clone(),
         php_pin: cfg.php.clone(),
         php_request: None,
@@ -341,6 +441,9 @@ fn missing_view(cfg: &ProjectConfig, root: Option<PathBuf>) -> ProjectView {
         mail: cfg.mail.clone(),
         storage: cfg.storage.clone(),
         workers: cfg.workers.clone(),
+        reverb_port: cfg.reverb_port,
+        queues: cfg.queues.clone(),
+        queue_connection: cfg.queue_connection.clone(),
         online: false,
     }
 }
@@ -351,6 +454,29 @@ pub fn unique_domain(base: &str, used: &[String]) -> String {
         return base.to_string();
     }
     (2..).map(|n| format!("{base}-{n}")).find(|c| !used.contains(c)).unwrap()
+}
+
+/// Limite de domínios extras por projeto (evita pedidos de UAC enormes no hosts).
+pub const MAX_ALIASES: usize = 20;
+
+/// Alias: rótulos de domínio separados por ponto (`finder.noveck`).
+pub fn validate_alias(alias: &str) -> Result<()> {
+    let ok = alias.len() <= 200
+        && alias.split('.').all(|l| {
+            !l.is_empty()
+                && l.len() <= 63
+                && l.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                && !l.starts_with('-')
+                && !l.ends_with('-')
+        });
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::Invalid(crate::t!(
+            "domínio extra \"{a}\" inválido: use letras minúsculas, números, hífen e ponto",
+            a = alias
+        )))
+    }
 }
 
 pub fn validate_domain(label: &str) -> Result<()> {
@@ -464,5 +590,64 @@ mod tests {
     fn paths_compare_like_windows() {
         assert!(same_path(Path::new(r"D:\WWW\Loja\"), Path::new("d:/www/loja")));
         assert!(!same_path(Path::new(r"D:\www\loja"), Path::new(r"D:\www\loja2")));
+    }
+
+    #[test]
+    fn alias_hosts_normalize_and_skip_main() {
+        let d = DetectedProject {
+            name: "finder".into(),
+            domain: "finder".into(),
+            path: PathBuf::from("x"),
+            root: PathBuf::from("."),
+            kind: ProjectKind::Laravel,
+            docroot: "public".into(),
+            php: None,
+            has_node: false,
+            node: None,
+            node_command: None,
+        };
+        let mut cfg = default_config(&d, "finder".into());
+        assert!(cfg.alias_hosts("local").is_empty());
+        cfg.aliases = vec![" Finder.Noveck ".into(), "finder.hubbi.local".into(), "finder".into(), "".into(), "finder.noveck".into()];
+        assert_eq!(cfg.alias_hosts("local"), vec!["finder.noveck.local".to_string(), "finder.hubbi.local".to_string()]);
+    }
+
+    #[test]
+    fn set_aliases_validates_and_detects_conflicts() {
+        let dir = std::env::temp_dir().join(format!("larafim-aliases-{}", std::process::id()));
+        let a = dir.join("a");
+        let b = dir.join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let d = |p: &Path, name: &str| DetectedProject {
+            name: name.into(),
+            domain: name.into(),
+            path: p.to_path_buf(),
+            root: dir.clone(),
+            kind: ProjectKind::Php,
+            docroot: String::new(),
+            php: None,
+            has_node: false,
+            node: None,
+            node_command: None,
+        };
+        let mut store = ProjectsFile::default();
+        store.upsert(default_config(&d(&a, "finder"), "finder".into())).unwrap();
+        store.upsert(default_config(&d(&b, "loja"), "loja".into())).unwrap();
+
+        store.set_aliases(&a, &[" Finder.Noveck.local ".into(), "finder.noveck".into(), "".into()], "local").unwrap();
+        assert_eq!(store.find(&a).unwrap().aliases, vec!["finder.noveck".to_string()]);
+
+        assert!(store.set_aliases(&a, &["loja".into()], "local").is_err(), "domínio de outro projeto");
+        assert!(store.set_aliases(&b, &["finder.noveck".into()], "local").is_err(), "alias de outro projeto");
+        assert!(store.set_aliases(&a, &["finder".into()], "local").is_err(), "domínio principal");
+        assert!(store.set_aliases(&a, &["a..b".into()], "local").is_err());
+        assert!(store.set_aliases(&a, &["-x".into()], "local").is_err());
+        // Falha não altera a lista atual.
+        assert_eq!(store.find(&a).unwrap().aliases, vec!["finder.noveck".to_string()]);
+
+        store.set_aliases(&a, &[], "local").unwrap();
+        assert!(store.find(&a).unwrap().aliases.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

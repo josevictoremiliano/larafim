@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use larafim_core::envfile::{self, DiffLine, EnvChange};
 use larafim_core::store::same_path;
-use larafim_core::{ProjectKind, ProjectView};
+use larafim_core::{ProjectKind, ProjectView, reverb, safety};
 use larafim_runtimes::php::{self as rphp};
 use larafim_runtimes::{http_client, tools};
 use larafim_server::DevSpec;
@@ -195,6 +195,7 @@ pub async fn project_mail_apply(app: AppHandle, path: PathBuf, kind: String) -> 
         start_mailpit(&app).await?;
         if envfile::env_path(&path).exists() {
             envfile::write(&path, &mail_changes(&kind)).map_err(|e| e.to_string())?;
+            env_changed(&app, &path);
         }
     } else if kind != "none" {
         return Err(t!("serviço de e-mail desconhecido: {kind}", kind = kind));
@@ -287,6 +288,121 @@ pub fn log_open(app: AppHandle, path: PathBuf, name: String) -> CmdResult<()> {
     app.opener().open_path(file.display().to_string(), None::<&str>).map_err(|e| e.to_string())
 }
 
+// ================= Após mudar o .env =================
+
+/// `php artisan config:clear` se o projeto tiver a configuração em cache
+/// (`bootstrap/cache/config.php`): com o cache, o Laravel ignora o `.env`.
+fn clear_config_cache(app: &AppHandle, path: &Path) {
+    if !path.join("artisan").is_file() || !path.join("bootstrap").join("cache").join("config.php").is_file() {
+        return;
+    }
+    let Ok(view) = view_of(app, path) else { return };
+    let installed = rphp::list_installed(&app.state::<AppState>().paths.php_dir());
+    let Some(php) = crate::server::php_for(&view, &installed).0 else { return };
+    let (exe, artisan) = (php.dir.join("php.exe").display().to_string(), path.join("artisan").display().to_string());
+    let ok = crate::redis::run_hidden(&exe, &[&artisan, "config:clear"], std::time::Duration::from_secs(60)).is_some_and(|(ok, _)| ok);
+    tracing::info!(path = %path.display(), ok, "config:clear depois de mudar o .env");
+}
+
+/// Depois de mudar o `.env`: limpa o cache de configuração e reinicia os
+/// workers que estão rodando (processos longos leem o `.env` só ao subir).
+pub fn env_changed(app: &AppHandle, path: &Path) {
+    let (app, path) = (app.clone(), path.to_path_buf());
+    tauri::async_runtime::spawn(async move {
+        let (a, p) = (app.clone(), path.clone());
+        let _ = tauri::async_runtime::spawn_blocking(move || clear_config_cache(&a, &p)).await;
+        let Ok(view) = view_of(&app, &path) else { return };
+        for w in ["queue", "schedule", "reverb"] {
+            if app.state::<ServerState>().dev.is_running(&worker_key(&path, w))
+                && let Err(e) = start_worker(&app, &view, w)
+            {
+                tracing::warn!(project = view.name, worker = w, "worker não reiniciou: {e}");
+            }
+        }
+    });
+}
+
+// ================= Instalações no projeto (Composer/Artisan) =================
+
+#[derive(Clone, Serialize)]
+struct InstallProgress {
+    path: PathBuf,
+    line: String,
+    percent: u8,
+}
+
+/// Roda um comando do Composer/Artisan no projeto e manda cada linha (com a
+/// porcentagem estimada) no evento `project-install`. Devolve (ok, saída).
+pub(crate) fn run_install(
+    app: &AppHandle,
+    path: &Path,
+    exe: &Path,
+    args: &[String],
+    env: &[(&str, String)],
+) -> (bool, String) {
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(exe);
+    cmd.args(args).current_dir(path).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return (false, e.to_string()),
+    };
+    let out = std::sync::Arc::new(Mutex::new(String::new()));
+    let percent = std::sync::Arc::new(Mutex::new(5u8));
+    let emit = |line: &str, p: u8| {
+        let _ = app.emit("project-install", InstallProgress { path: path.to_path_buf(), line: line.to_string(), percent: p });
+    };
+    emit("", 5);
+    let readers: Vec<Box<dyn std::io::Read + Send>> = vec![
+        Box::new(child.stdout.take().expect("stdout")),
+        Box::new(child.stderr.take().expect("stderr")),
+    ];
+    let handles: Vec<_> = readers
+        .into_iter()
+        .map(|r| {
+            let (app, path, out, percent) = (app.clone(), path.to_path_buf(), out.clone(), percent.clone());
+            std::thread::spawn(move || {
+                for line in std::io::BufReader::new(r).lines().map_while(Result::ok) {
+                    let line = larafim_server::devserver::strip_ansi(&line);
+                    let p = {
+                        let mut cur = percent.lock().unwrap();
+                        if let Some(n) = larafim_core::composer::progress(&line) {
+                            *cur = (*cur).max(n); // nunca volta
+                        }
+                        *cur
+                    };
+                    {
+                        let mut o = out.lock().unwrap();
+                        if o.len() < 64 * 1024 {
+                            o.push_str(&line);
+                            o.push('\n');
+                        }
+                    }
+                    if !line.trim().is_empty() {
+                        let _ = app.emit("project-install", InstallProgress { path: path.clone(), line: line.trim().to_string(), percent: p });
+                    }
+                }
+            })
+        })
+        .collect();
+    let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+    for h in handles {
+        let _ = h.join();
+    }
+    emit("", if ok { 100 } else { *percent.lock().unwrap() });
+    let text = out.lock().unwrap().clone();
+    (ok, text)
+}
+
 // ================= Workers do Laravel =================
 
 pub fn worker_key(path: &Path, worker: &str) -> String {
@@ -308,6 +424,31 @@ pub fn start_worker(app: &AppHandle, view: &ProjectView, worker: &str) -> Result
     if view.kind != ProjectKind::Laravel {
         return Err(t!("workers só existem em projetos Laravel"));
     }
+    let key = worker_key(&view.path, worker);
+    // O Reverb escuta na porta do projeto (a linha de comando vale mais que o
+    // .env), para dois projetos não disputarem a 8080.
+    let args = if worker == "reverb" {
+        let port = view.reverb_port.ok_or_else(|| t!("ligue o Reverb pelo painel do projeto para escolher a porta"))?;
+        if !app.state::<ServerState>().dev.is_running(&key)
+            && let Err(owner) = larafim_server::port::check_free(port)
+        {
+            let who = owner.map(|o| o.name).unwrap_or_else(|| t!("outro programa"));
+            return Err(t!(
+                "a porta {port} (Reverb) está ocupada por {who}; desligue e ligue o Reverb para trocar de porta",
+                port = port,
+                who = who
+            ));
+        }
+        format!("{args} --host={} --port={port}", reverb::HOST)
+    } else if worker == "queue" {
+        // Nomes já validados (só letras, números e `._:-`): seguros no cmd.exe.
+        let list: Vec<&str> = view.queues.iter().map(String::as_str).filter(|q| safety::is_queue_name(q)).collect();
+        let connection = if crate::redis::wanted_by(view) { " redis" } else { "" };
+        let args = args.replacen("queue:work", &format!("queue:work{connection}"), 1);
+        if list.is_empty() { args } else { format!("{args} --queue={}", list.join(",")) }
+    } else {
+        args.to_string()
+    };
     let installed = rphp::list_installed(&app.state::<AppState>().paths.php_dir());
     let (php, _) = crate::server::php_for(view, &installed);
     let php = php.ok_or_else(|| t!("nenhum PHP instalado atende a este projeto"))?;
@@ -315,7 +456,7 @@ pub fn start_worker(app: &AppHandle, view: &ProjectView, worker: &str) -> Result
     app.state::<ServerState>()
         .dev
         .start(DevSpec {
-            key: worker_key(&view.path, worker),
+            key,
             cwd: view.path.clone(),
             command: format!("\"{}\" {args}", exe.display()),
             node_dir: php.dir.clone(),
@@ -333,6 +474,20 @@ pub fn stop_workers(app: &AppHandle, path: &Path) {
 /// Liga os workers marcados de um projeto (ao ficar online).
 pub fn start_workers(app: &AppHandle, view: &ProjectView) {
     for w in &view.workers {
+        // Fila ligada antes de existir a descoberta: descobre e liga depois.
+        if w == "queue" && view.queues.is_empty() {
+            let (app, view) = (app.clone(), view.clone());
+            tauri::async_runtime::spawn(async move {
+                let found = discover_queues(&app, &view).await;
+                let started = update_project(&app, &view.path, |p| p.queues = found)
+                    .and_then(|_| view_of(&app, &view.path))
+                    .and_then(|v| start_worker(&app, &v, "queue"));
+                if let Err(e) = started {
+                    tracing::warn!(project = view.name, "worker de fila não iniciou: {e}");
+                }
+            });
+            continue;
+        }
         if let Err(e) = start_worker(app, view, w) {
             tracing::warn!(project = view.name, worker = w, "worker não iniciou: {e}");
         }
@@ -343,9 +498,19 @@ pub fn start_workers(app: &AppHandle, view: &ProjectView) {
 // processos usa o runtime assíncrono (num comando síncrono o app cairia).
 
 /// Marca/desmarca um worker. Se o projeto estiver online, liga/desliga na hora.
+/// O Reverb liga na hora mesmo com o projeto offline e ajusta o `.env` (a
+/// interface mostra a prévia antes).
 #[tauri::command]
 pub async fn worker_set(app: AppHandle, path: PathBuf, worker: String, enabled: bool) -> CmdResult<()> {
     worker_command(&worker).ok_or_else(|| t!("worker desconhecido"))?;
+    if worker == "reverb" && enabled {
+        return reverb_enable(&app, &path).await;
+    }
+    // Primeira vez: descobre as filas do projeto antes de ligar.
+    if worker == "queue" && enabled && view_of(&app, &path)?.queues.is_empty() {
+        let found = discover_queues(&app, &view_of(&app, &path)?).await;
+        update_project(&app, &path, |p| p.queues = found)?;
+    }
     update_project(&app, &path, |p| {
         p.workers.retain(|w| w != &worker);
         if enabled {
@@ -376,7 +541,289 @@ pub fn process_info(app: AppHandle, key: String) -> crate::server::DevInfo {
 /// Projeto tem Reverb instalado?
 #[tauri::command]
 pub fn has_reverb(path: PathBuf) -> bool {
-    path.join("config").join("reverb.php").is_file()
+    reverb::is_installed(&path)
+}
+
+/// Instala o Reverb no projeto (a pessoa confirma antes): o mesmo que
+/// `php artisan install:broadcasting --reverb`, sem perguntas e sem npm,
+/// usando o PHP e o Composer do Larafim. Altera composer.json, rotas e .env.
+#[tauri::command]
+pub async fn project_install_reverb(app: AppHandle, path: PathBuf) -> CmdResult<()> {
+    if reverb::is_installed(&path) {
+        return Ok(());
+    }
+    let view = view_of(&app, &path)?;
+    if view.kind != ProjectKind::Laravel {
+        return Err(t!("workers só existem em projetos Laravel"));
+    }
+    let paths = app.state::<AppState>().paths.clone();
+    let composer = larafim_runtimes::extras::composer_path(&paths);
+    if !composer.is_file() {
+        return Err(t!("o Composer ainda não foi baixado (instale um PHP pelo Larafim)"));
+    }
+    let installed = rphp::list_installed(&paths.php_dir());
+    let php = crate::server::php_for(&view, &installed).0.ok_or_else(|| t!("nenhum PHP instalado atende a este projeto"))?;
+    // O comando roda o reverb:install, que lê o banco/cache em alguns projetos.
+    crate::server::start_project_db(&app, &view).await?;
+    let (app2, dir) = (app.clone(), path.clone());
+    let args: Vec<String> = ["artisan", "install:broadcasting", "--reverb", "--without-node", "--no-interaction", "--no-ansi"]
+        .iter()
+        .map(|s| s.to_string())
+        .chain([format!("--composer={}", composer.display())])
+        .collect();
+    let exe = php.dir.join("php.exe");
+    // O Composer chamado pelo Laravel usa este PHP (o do projeto).
+    let path_env = format!("{};{}", php.dir.display(), std::env::var("PATH").unwrap_or_default());
+    let (ok, out) = tauri::async_runtime::spawn_blocking(move || {
+        run_install(&app2, &dir, &exe, &args, &[("PATH", path_env), ("COMPOSER_NO_INTERACTION", "1".into())])
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    tracing::info!(path = %path.display(), ok, "install:broadcasting --reverb");
+    // Instalação interrompida deixa o vendor sem autoload novo ("Class Pusher\Pusher
+    // not found"): refaz o autoload e publica a config, se faltar.
+    let (ok, out) = if !reverb::is_installed(&path) && path.join("vendor").join("laravel").join("reverb").is_dir() {
+        let (app2, dir, exe) = (app.clone(), path.clone(), php.dir.join("php.exe"));
+        let args = vec![composer.display().to_string(), "dump-autoload".into(), "--no-interaction".into(), "--no-ansi".into()];
+        tauri::async_runtime::spawn_blocking(move || run_install(&app2, &dir, &exe, &args, &[("COMPOSER_NO_INTERACTION", "1".into())]))
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        (ok, out)
+    };
+    if reverb::is_installed(&path) && !path.join("config").join("reverb.php").is_file() {
+        let (app2, dir, exe) = (app.clone(), path.clone(), php.dir.join("php.exe"));
+        let args: Vec<String> = ["artisan", "vendor:publish", "--tag=reverb-config", "--no-interaction", "--no-ansi"].iter().map(|s| s.to_string()).collect();
+        let _ = tauri::async_runtime::spawn_blocking(move || run_install(&app2, &dir, &exe, &args, &[])).await;
+    }
+    if !ok || !reverb::is_installed(&path) {
+        let tail: String = out.trim().chars().rev().take(500).collect::<String>().chars().rev().collect();
+        return Err(t!("não foi possível instalar o Reverb: {a}", a = tail));
+    }
+    env_changed(&app, &path);
+    Ok(())
+}
+
+// ================= Filas =================
+
+/// Pergunta ao Laravel quais filas ele declara (conexão padrão, Horizon,
+/// `queue.names`) e junta com os `onQueue('...')` do código. Se o PHP
+/// falhar (banco desligado num provider, por exemplo), fica só a varredura.
+async fn discover_queues(app: &AppHandle, view: &ProjectView) -> Vec<String> {
+    let installed = rphp::list_installed(&app.state::<AppState>().paths.php_dir());
+    let php = crate::server::php_for(view, &installed).0.map(|p| p.dir.join("php.exe"));
+    let dir = view.path.clone();
+    let probe = tauri::async_runtime::spawn_blocking(move || {
+        let declared = php.map(|exe| run_probe(&exe, &dir)).unwrap_or_default();
+        larafim_core::queues::merge(&[declared, larafim_core::queues::scan_project(&dir)])
+    });
+    probe.await.unwrap_or_else(|_| vec!["default".into()])
+}
+
+/// Roda `PHP_PROBE` com tempo limite (um provider travado não segura o app).
+fn run_probe(php: &Path, project: &Path) -> Vec<String> {
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(php);
+    cmd.arg("-r").arg(larafim_core::queues::PHP_PROBE).current_dir(project).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let Ok(mut child) = cmd.spawn() else { return Vec::new() };
+    let mut stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        if let Some(out) = stdout.as_mut() {
+            let _ = out.take(1024 * 1024).read_to_string(&mut s);
+        }
+        s
+    });
+    let started = std::time::Instant::now();
+    while child.try_wait().ok().flatten().is_none() {
+        if started.elapsed() > std::time::Duration::from_secs(30) {
+            let _ = child.kill();
+            tracing::warn!(path = %project.display(), "descoberta de filas passou do tempo");
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let _ = child.wait();
+    larafim_core::queues::parse_probe(&reader.join().unwrap_or_default())
+}
+
+/// Se o worker de fila estiver rodando, reinicia com a lista nova.
+pub(crate) fn restart_queue_if_running(app: &AppHandle, path: &Path) -> Result<(), String> {
+    if app.state::<ServerState>().dev.is_running(&worker_key(path, "queue")) {
+        start_worker(app, &view_of(app, path)?, "queue")?;
+    }
+    Ok(())
+}
+
+/// Descobre de novo as filas do projeto e grava.
+#[tauri::command]
+pub async fn queues_discover(app: AppHandle, path: PathBuf) -> CmdResult<Vec<String>> {
+    let view = view_of(&app, &path)?;
+    if view.kind != ProjectKind::Laravel {
+        return Err(t!("workers só existem em projetos Laravel"));
+    }
+    let found = discover_queues(&app, &view).await;
+    update_project(&app, &path, |p| p.queues = found.clone())?;
+    restart_queue_if_running(&app, &path)?;
+    Ok(found)
+}
+
+/// Grava a lista editada pela pessoa (`a, b, c`).
+#[tauri::command]
+pub async fn queues_set(app: AppHandle, path: PathBuf, text: String) -> CmdResult<Vec<String>> {
+    let list = larafim_core::queues::parse_list(&text).map_err(|bad| t!("nome de fila inválido: {a}", a = bad.escape_debug()))?;
+    let list = if list.is_empty() { vec!["default".to_string()] } else { list };
+    if list.len() > larafim_core::queues::MAX_QUEUES {
+        return Err(t!("nome de fila inválido"));
+    }
+    update_project(&app, &path, |p| p.queues = list.clone())?;
+    restart_queue_if_running(&app, &path)?;
+    Ok(list)
+}
+
+// ================= Reverb =================
+
+/// Portas que o Reverb deste projeto não pode usar: as dos outros projetos
+/// (mesmo offline, para cada um manter a sua) e as dos serviços do Larafim.
+fn reverb_reserved(app: &AppHandle, except: &Path) -> Vec<u16> {
+    let state = app.state::<AppState>();
+    let c = state.config.lock().unwrap().clone();
+    let mut ports = vec![
+        c.http_port,
+        c.https_port,
+        c.db_port,
+        c.pg_port,
+        MAIL_UI_PORT,
+        MAIL_SMTP_PORT,
+        crate::s3::S3_API_PORT,
+        crate::s3::S3_CONSOLE_PORT,
+    ];
+    ports.extend(c.redis.as_ref().map(|r| r.port));
+    for p in state.projects.lock().unwrap().projects.iter().filter(|p| !same_path(&p.path, except)) {
+        ports.extend(p.reverb_port);
+        ports.extend(p.db_port);
+    }
+    ports
+}
+
+/// Porta do Reverb do projeto: mantém a atual enquanto servir; senão, a
+/// primeira livre da faixa.
+fn reverb_port_for(app: &AppHandle, path: &Path) -> Result<u16, String> {
+    let current = app.state::<AppState>().projects.lock().unwrap().find(path).and_then(|p| p.reverb_port);
+    let reserved = reverb_reserved(app, path);
+    let ours = app.state::<ServerState>().dev.is_running(&worker_key(path, "reverb"));
+    if let Some(p) = current
+        && reverb::PORTS.contains(&p)
+        && !reserved.contains(&p)
+        && (ours || larafim_server::port::check_free(p).is_ok())
+    {
+        return Ok(p);
+    }
+    reverb::pick_port(&reserved, |p| larafim_server::port::check_free(p).is_ok()).ok_or_else(|| {
+        t!("nenhuma porta livre entre {a} e {b} para o Reverb", a = reverb::PORTS.start(), b = reverb::PORTS.end())
+    })
+}
+
+/// Endereço do Reverb para o navegador: o domínio do projeto no gateway
+/// (HTTPS, se estiver ligado).
+fn reverb_public(app: &AppHandle, path: &Path) -> Result<reverb::Public, String> {
+    let state = app.state::<AppState>();
+    let c = state.config.lock().unwrap().clone();
+    let domain = state.projects.lock().unwrap().find(path).map(|p| p.domain.clone()).ok_or_else(|| t!("importe o projeto antes"))?;
+    Ok(reverb::Public {
+        host: format!("{domain}.{}", c.tld),
+        port: if c.https { c.https_port } else { c.http_port },
+        https: c.https,
+    })
+}
+
+fn reverb_credentials() -> reverb::Credentials {
+    const ALNUM: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    reverb::Credentials {
+        app_id: crate::s3::random_token(b"123456789", 6),
+        app_key: crate::s3::random_token(ALNUM, 20),
+        app_secret: crate::s3::random_token(ALNUM, 20),
+    }
+}
+
+#[derive(Serialize)]
+pub struct ReverbPreview {
+    installed: bool,
+    port: u16,
+    diff: Vec<DiffLine>,
+    /// Não há .env: será criado a partir do .env.example.
+    from_example: bool,
+    /// Não há .env nem .env.example: só a porta muda.
+    no_env: bool,
+}
+
+/// O que ligar o Reverb faria: porta escolhida e mudanças no `.env`.
+#[tauri::command]
+pub fn reverb_preview(app: AppHandle, path: PathBuf) -> CmdResult<ReverbPreview> {
+    let env = envfile::env_path(&path);
+    let example = path.join(".env.example");
+    if !reverb::is_installed(&path) {
+        return Ok(ReverbPreview { installed: false, port: 0, diff: Vec::new(), from_example: false, no_env: false });
+    }
+    let port = reverb_port_for(&app, &path)?;
+    let base = std::fs::read_to_string(&env).or_else(|_| std::fs::read_to_string(&example)).unwrap_or_default();
+    // Credenciais novas só aparecem como "gerada": o valor real é criado ao aplicar.
+    let generated = t!("(gerada)");
+    let fake = reverb::Credentials { app_id: generated.clone(), app_key: generated.clone(), app_secret: generated };
+    let changes = reverb::env_changes(&base, port, &reverb_public(&app, &path)?, &fake);
+    envfile::validate(&changes).map_err(|e| e.to_string())?;
+    Ok(ReverbPreview {
+        installed: true,
+        port,
+        diff: envfile::apply(&base, &changes).1,
+        from_example: !env.exists() && example.exists(),
+        no_env: !env.exists() && !example.exists(),
+    })
+}
+
+/// Liga o Reverb do projeto: escolhe a porta, ajusta o `.env` (com cópia),
+/// marca para ligar junto com o projeto e já inicia.
+async fn reverb_enable(app: &AppHandle, path: &Path) -> Result<(), String> {
+    let view = view_of(app, path)?;
+    if view.kind != ProjectKind::Laravel {
+        return Err(t!("workers só existem em projetos Laravel"));
+    }
+    if !reverb::is_installed(path) {
+        return Err(t!("o Reverb não está instalado neste projeto (php artisan install:broadcasting)"));
+    }
+    let port = reverb_port_for(app, path)?;
+    let public = reverb_public(app, path)?;
+    let env = envfile::env_path(path);
+    let example = path.join(".env.example");
+    if !env.exists() && example.exists() {
+        std::fs::copy(&example, &env).map_err(|e| e.to_string())?;
+    }
+    if env.exists() {
+        let text = std::fs::read_to_string(&env).map_err(|e| e.to_string())?;
+        envfile::write(path, &reverb::env_changes(&text, port, &public, &reverb_credentials())).map_err(|e| e.to_string())?;
+        clear_config_cache(app, path);
+        // A fila também publica eventos: precisa ler o BROADCAST_* novo.
+        restart_queue_if_running(app, path)?;
+    }
+    update_project(app, path, |p| {
+        p.reverb_port = Some(port);
+        if !p.workers.iter().any(|w| w == "reverb") {
+            p.workers.push("reverb".into());
+        }
+    })?;
+    // O `reverb:start` lê o cache (que costuma estar no banco): com o projeto
+    // offline, o banco dele pode estar desligado.
+    crate::server::start_project_db(app, &view).await?;
+    tracing::info!(path = %path.display(), port, "Reverb do projeto ligado");
+    start_worker(app, &view_of(app, path)?, "reverb")?;
+    // Rotas novas: o gateway passa a repassar o WebSocket para a porta.
+    crate::server::after_change(app, false);
+    Ok(())
 }
 
 // ================= Xdebug =================

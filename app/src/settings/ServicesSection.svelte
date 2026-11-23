@@ -18,6 +18,7 @@
   import { toolsApi, type MailpitStatus } from "../lib/tools";
   import { pg, type PgOverview } from "../lib/pg";
   import { s3, type S3Status } from "../lib/s3";
+  import { redis, type RedisStatus } from "../lib/redis";
 
   // Serviços: lista agrupada à esquerda, detalhes do selecionado à direita.
 
@@ -26,6 +27,8 @@
   let pgView = $state<PgOverview | null>(null);
   let mail = $state<MailpitStatus | null>(null);
   let s3st = $state<S3Status | null>(null);
+  let redisSt = $state<RedisStatus | null>(null);
+  let redisPort = $state(6379);
   let connections = $state<ConnectionInfo[]>([]);
   let detected = $state<DetectedDb[]>([]);
 
@@ -34,6 +37,7 @@
   /** Downloads em andamento: MariaDB por versão ("11.8"), PostgreSQL com "pg" na frente. */
   let progress = $state<Record<string, { received: number; total: number | null } | "starting">>({});
   let s3progress = $state<{ received: number; total: number | null } | null>(null);
+  let redisProgress = $state<{ received: number; total: number | null } | null>(null);
   let mailInstalling = $state(false);
 
   let port = $state(3306);
@@ -63,6 +67,10 @@
   async function loadS3() {
     s3st = await s3.status().catch(() => null);
   }
+  async function loadRedis() {
+    redisSt = await redis.status().catch(() => null);
+    if (redisSt?.config) redisPort = redisSt.config.port;
+  }
   async function loadConnections() {
     connections = await services.connections().catch(() => []);
     detected = await services.detect().catch(() => []);
@@ -72,6 +80,7 @@
     loadPg();
     loadMail();
     loadS3();
+    loadRedis();
     loadConnections();
     loadInfo();
   }
@@ -81,10 +90,12 @@
     loadPg();
     loadMail();
     loadS3();
+    loadRedis();
     loadConnections();
     const stops = [
       onEvent("services-changed", loadAll),
       onEvent<{ received: number; total: number | null }>("s3:progress", (p) => (s3progress = p)),
+      onEvent<{ received: number; total: number | null }>("redis:progress", (p) => (redisProgress = p)),
       onEvent<{ major: string; received: number; total: number | null }>("pg:progress", (p) => {
         progress["pg" + p.major] = { received: p.received, total: p.total };
       }),
@@ -136,8 +147,9 @@
   const mariaDownload = $derived(Object.entries(progress).find(([k]) => !k.startsWith("pg"))?.[1] ?? null);
   const pgDownload = $derived(Object.entries(progress).find(([k]) => k.startsWith("pg"))?.[1] ?? null);
   const s3Download = $derived<Progress | null>(s3progress ?? (s3st?.installing ? "starting" : null));
+  const redisDownload = $derived<Progress | null>(redisProgress ?? (redisSt?.installing ? "starting" : null));
 
-  type Kind = "mariadb" | "postgres" | "own" | "conn" | "mailpit" | "s3";
+  type Kind = "mariadb" | "postgres" | "own" | "conn" | "mailpit" | "s3" | "redis";
   interface Item {
     id: string;
     kind: Kind;
@@ -233,6 +245,23 @@
         ],
       });
     }
+    if (redisSt?.config) {
+      const c = redisSt.config;
+      const where = c.backend === "native" ? "Windows" : c.backend === "docker" ? "Docker" : `WSL · ${c.distro ?? ""}`;
+      out.push({
+        title: t("Filas e cache"),
+        items: [
+          {
+            id: "redis",
+            kind: "redis",
+            name: "Redis",
+            sub: redisSt.running ? t("{v} · porta {port}", { v: where, port: c.port }) : t("Desligado · porta {port}", { port: c.port }),
+            running: redisSt.running,
+            download: redisDownload,
+          },
+        ],
+      });
+    }
     return out;
   });
   const items = $derived(groups.flatMap((g) => g.items));
@@ -248,6 +277,7 @@
       own: [() => services.ownStart(path), () => services.ownStop(path)],
       mailpit: [toolsApi.mailpitStart, async () => toolsApi.mailpitStop()],
       s3: [s3.start, s3.stop],
+      redis: [redis.start, redis.stop],
     };
     if (item.kind === "conn") return;
     run(actions[item.kind][start ? 0 : 1]);
@@ -321,6 +351,33 @@
     }
     if (p !== overview.port) run(() => services.configure(overview!.selected, p));
   }
+  function commitRedis(backend: "native" | "docker" | "wsl", distro: string | null, p: number) {
+    if (!Number.isInteger(p) || p < 1024 || p > 65535) {
+      redisPort = redisSt?.config?.port ?? 6379;
+      return;
+    }
+    run(async () => {
+      await redis.configure(backend, backend === "wsl" ? (distro ?? redisSt?.distros[0] ?? null) : null, p);
+      if (backend === "native" && !redisSt?.native_installed) await installRedis();
+    });
+  }
+  async function installRedis() {
+    redisProgress = { received: 0, total: null };
+    try {
+      await redis.install();
+    } finally {
+      redisProgress = null;
+    }
+  }
+  async function removeRedis() {
+    const ok = await confirm(
+      t("Tirar o Redis do Larafim? Os dados (volume do Docker ou dump.rdb) ficam guardados."),
+      t("Remover Redis"),
+      t("Remover"),
+    );
+    if (ok) run(redis.remove);
+  }
+
   function commitPgPort() {
     if (!pgView) return;
     const p = Number(pgPort);
@@ -432,6 +489,12 @@
         } finally {
           mailInstalling = false;
         }
+      });
+    } else if (c.kind === "redis") {
+      selectedId = "redis";
+      run(async () => {
+        await redis.configure(c.backend, c.distro, c.port);
+        if (c.backend === "native") await installRedis();
       });
     } else if (c.kind === "s3") {
       selectedId = "s3";
@@ -604,6 +667,44 @@
           <div class="kv"><span>{t("Versão")}</span><span>{s3st.version ?? "—"}</span></div>
           <div class="kv"><span>API</span><span class="mono">{s3st.endpoint.replace(/^https?:\/\//, "")}</span></div>
           <div class="kv"><span>{t("Chave de acesso")}</span><span class="mono">{s3st.access_key}</span></div>
+        {:else if item.kind === "redis" && redisSt?.config}
+          {@const rc = redisSt.config}
+          <div class="kv">
+            <span>{t("Rodar no")}</span>
+            <div class="select">
+              <select value={rc.backend} disabled={busy} onchange={(e) => commitRedis(e.currentTarget.value as "native" | "docker" | "wsl", rc.distro, rc.port)}>
+                <option value="native">{t("Windows (nativo)")}</option>
+                <option value="docker">Docker</option>
+                <option value="wsl" disabled={!redisSt.distros.length}>WSL2</option>
+              </select>
+            </div>
+          </div>
+          {#if rc.backend === "wsl"}
+            <div class="kv">
+              <span>{t("Distribuição")}</span>
+              <div class="select">
+                <select value={rc.distro ?? ""} disabled={busy} onchange={(e) => commitRedis("wsl", e.currentTarget.value, rc.port)}>
+                  {#each redisSt.distros as d (d)}<option value={d}>{d}</option>{/each}
+                </select>
+              </div>
+            </div>
+          {:else if rc.backend === "native"}
+            <div class="kv"><span>{t("Versão")}</span><span>{redisSt.native_version ?? "—"}</span></div>
+          {:else}
+            <div class="kv"><span>{t("Imagem")}</span><span class="mono">{redisSt.image}</span></div>
+          {/if}
+          <div class="kv">
+            <span>{t("Porta")}</span>
+            <input
+              class="input port"
+              type="number"
+              min="1024"
+              max="65535"
+              bind:value={redisPort}
+              onblur={() => Number(redisPort) !== rc.port && commitRedis(rc.backend, rc.distro, Number(redisPort))}
+              onkeydown={(e) => e.key === "Enter" && Number(redisPort) !== rc.port && commitRedis(rc.backend, rc.distro, Number(redisPort))}
+            />
+          </div>
         {/if}
         {#if info?.data_dir}
           <div class="kv">
@@ -638,6 +739,15 @@
         {/if}
         {#if item.kind === "s3"}
           <div class="kv"><span>{t("Console")}</span><button class="btn" disabled={busy} onclick={() => run(s3.open)}>{t("Abrir")}</button></div>
+        {/if}
+        {#if item.kind === "redis"}
+          {#if redisSt?.config?.backend === "native"}
+            <div class="kv">
+              <span>{redisSt.native_installed ? t("Atualizar") : t("Instalar")}</span>
+              <button class="btn" disabled={busy} onclick={() => run(installRedis)}>{redisSt.native_installed ? t("Atualizar") : t("Instalar")}</button>
+            </div>
+          {/if}
+          <div class="kv"><span>Redis</span><button class="btn" disabled={busy} onclick={removeRedis}>{t("Remover")}</button></div>
         {/if}
         {#if info?.data_dir}
           <div class="kv"><span>{t("Pasta de dados")}</span><button class="btn" disabled={busy} onclick={() => run(() => api.openFolder(info!.data_dir!))}>{t("Abrir")}</button></div>
@@ -745,6 +855,7 @@
     pgPort={pgView.port}
     mailInstalled={!!mail?.installed}
     s3Installed={!!s3st?.installed}
+    redisStatus={redisSt}
     onclose={() => (adding = false)}
     onadd={onAdd}
   />

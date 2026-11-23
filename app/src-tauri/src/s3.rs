@@ -39,17 +39,22 @@ pub fn s3_url(app: &AppHandle) -> String {
 
 /// 32 caracteres aleatórios (só para o storage local).
 fn random_secret() -> String {
-    const ALPHABET: &[u8] = b"abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    random_token(b"abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789", 32)
+}
+
+/// `len` caracteres aleatórios de `alphabet` (credenciais de serviços locais).
+pub(crate) fn random_token(alphabet: &[u8], len: usize) -> String {
     let mut out = String::new();
-    while out.len() < 32 {
+    while out.len() < len {
         let mut h = std::collections::hash_map::RandomState::new().build_hasher();
         h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
         let mut n = h.finish();
         for _ in 0..8 {
-            out.push(ALPHABET[(n % ALPHABET.len() as u64) as usize] as char);
-            n /= ALPHABET.len() as u64;
+            out.push(alphabet[(n % alphabet.len() as u64) as usize] as char);
+            n /= alphabet.len() as u64;
         }
     }
+    out.truncate(len);
     out
 }
 
@@ -267,6 +272,7 @@ pub async fn project_storage_apply(app: AppHandle, path: PathBuf, kind: String) 
         s3::create_bucket(&client, S3_API_PORT, S3_ACCESS, &secret, &bucket).await.map_err(|e| e.to_string())?;
         if envfile::env_path(&path).exists() {
             envfile::write(&path, &changes(&bucket, &secret)).map_err(|e| e.to_string())?;
+            crate::tools::env_changed(&app, &path);
         }
     } else if kind != "none" {
         return Err(t!("storage desconhecido: {kind}", kind = kind));

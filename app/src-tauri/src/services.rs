@@ -684,6 +684,7 @@ pub async fn project_db_apply(app: AppHandle, path: PathBuf, kind: String, own: 
         }
         if env.exists() {
             envfile::write(&path, &changes_for(&app, &path, &cfg.domain, &kind, own.as_ref())?).map_err(|e| e.to_string())?;
+            crate::tools::env_changed(&app, &path);
         }
     }
     {
@@ -710,8 +711,10 @@ pub async fn apply_db(app: &AppHandle, path: &Path, kind: &str) -> Result<(), St
 }
 
 #[tauri::command]
-pub fn project_env_undo(path: PathBuf) -> CmdResult<()> {
-    envfile::undo(&path).map_err(|e| e.to_string())
+pub fn project_env_undo(app: AppHandle, path: PathBuf) -> CmdResult<()> {
+    envfile::undo(&path).map_err(|e| e.to_string())?;
+    crate::tools::env_changed(&app, &path);
+    Ok(())
 }
 
 #[tauri::command]

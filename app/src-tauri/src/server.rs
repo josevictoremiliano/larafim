@@ -124,10 +124,15 @@ fn build_routes(app: &AppHandle) -> Routes {
         // Projeto só de Node: o gateway repassa para o servidor de dev.
         let proxy = (v.kind == ProjectKind::Node)
             .then(|| dev.port_cell(&dev_key(&v.path)).unwrap_or_else(|| Arc::new(std::sync::Mutex::new(None))));
-        routes.sites.insert(
-            format!("{}.{tld}", v.domain),
-            Site { name: v.name.clone(), docroot: v.path.join(&v.docroot), php, php_missing, online: v.online, proxy },
-        );
+        // Reverb ligado: o WebSocket do navegador passa pelo gateway.
+        let ws = v.reverb_port.filter(|_| v.kind == ProjectKind::Laravel && v.workers.iter().any(|w| w == "reverb"));
+        let site = Site { name: v.name.clone(), docroot: v.path.join(&v.docroot), php, php_missing, online: v.online, proxy, ws };
+        // Aliases apontam para o mesmo site (mesmo PHP, proxy e Reverb).
+        let aliases = state.projects.lock().unwrap().find(&v.path).map(|c| c.alias_hosts(&tld)).unwrap_or_default();
+        for host in aliases {
+            routes.sites.entry(host).or_insert_with(|| site.clone());
+        }
+        routes.sites.insert(format!("{}.{tld}", v.domain), site);
     }
     // Caixa de e-mails do Mailpit em mail.<domínio> (proxy para a interface dele).
     if larafim_runtimes::tools::mailpit_installed(&state.paths) {
@@ -143,6 +148,7 @@ fn build_routes(app: &AppHandle) -> Routes {
                 php_missing: false,
                 online: true,
                 proxy: Some(cell),
+                ws: None,
             },
         );
     }
@@ -158,6 +164,7 @@ fn build_routes(app: &AppHandle) -> Routes {
                 php_missing: false,
                 online: true,
                 proxy: Some(Arc::new(std::sync::Mutex::new(Some(crate::s3::S3_CONSOLE_PORT)))),
+                ws: None,
             },
         );
     }
@@ -174,6 +181,7 @@ fn build_routes(app: &AppHandle) -> Routes {
                 php_missing: false,
                 online: true,
                 proxy: None,
+                ws: None,
             },
         );
     }
@@ -191,7 +199,7 @@ fn wanted_hosts(app: &AppHandle) -> BTreeSet<String> {
         .unwrap()
         .projects
         .iter()
-        .map(|p| format!("{}.{tld}", p.domain))
+        .flat_map(|p| std::iter::once(format!("{}.{tld}", p.domain)).chain(p.alias_hosts(&tld)))
         .chain(larafim_runtimes::extras::adminer_installed(&state.paths).then(|| format!("db.{tld}")))
         .chain(larafim_runtimes::tools::mailpit_installed(&state.paths).then(|| format!("mail.{tld}")))
         .chain(larafim_runtimes::s3::rustfs_installed(&state.paths).then(|| format!("s3.{tld}")))
@@ -396,6 +404,20 @@ pub struct OnlineResult {
     status: ServerStatus,
 }
 
+/// Liga o que o projeto precisa antes do PHP: o banco gerenciado (MariaDB,
+/// MariaDB próprio ou PostgreSQL) e o Redis, se a fila usa ele.
+pub async fn start_project_db(app: &AppHandle, view: &larafim_core::ProjectView) -> Result<(), String> {
+    if crate::redis::wanted_by(view) {
+        crate::redis::start_redis(app).await?;
+    }
+    match view.database.as_deref() {
+        Some("mariadb") => crate::services::start_maria(app).await,
+        Some("mariadb-own") => crate::services::start_own(app, &view.path).await,
+        Some("postgres") => crate::pg::start_pg(app).await,
+        _ => Ok(()),
+    }
+}
+
 /// Liga ou desliga um projeto.
 #[tauri::command]
 pub async fn set_project_online(app: AppHandle, path: PathBuf, online: bool) -> Result<OnlineResult, ServerError> {
@@ -414,15 +436,7 @@ pub async fn set_project_online(app: AppHandle, path: PathBuf, online: bool) -> 
             return Err(e);
         }
         ensure_hosts(&app).await?;
-        if view.database.as_deref() == Some("mariadb") {
-            crate::services::start_maria(&app).await.map_err(|m| ServerError::new("db_failed", m))?;
-        }
-        if view.database.as_deref() == Some("mariadb-own") {
-            crate::services::start_own(&app, &view.path).await.map_err(|m| ServerError::new("db_failed", m))?;
-        }
-        if view.database.as_deref() == Some("postgres") {
-            crate::pg::start_pg(&app).await.map_err(|m| ServerError::new("db_failed", m))?;
-        }
+        start_project_db(&app, &view).await.map_err(|m| ServerError::new("db_failed", m))?;
         if view.storage.as_deref() == Some("s3") {
             crate::s3::start_s3(&app).await.map_err(|m| ServerError::new("error", m))?;
         }
@@ -556,6 +570,11 @@ pub fn start(app: &AppHandle) {
         {
             tracing::warn!("PostgreSQL não iniciou: {e}");
         }
+        if views(&app.state::<AppState>()).iter().any(|v| v.online && crate::redis::wanted_by(v))
+            && let Err(e) = crate::redis::start_redis(&app).await
+        {
+            tracing::warn!("Redis não iniciou: {e}");
+        }
         // Religa os servidores do Node dos projetos que estavam online.
         for v in views(&app.state::<AppState>()).into_iter().filter(|v| v.online && needs_dev(v)) {
             if let Err(e) = start_dev(&app, &v) {
@@ -596,6 +615,7 @@ pub fn shutdown(app: &AppHandle) {
         app.state::<crate::services::ServicesState>().maria.stop().await;
         crate::services::stop_all_own(app).await;
         app.state::<crate::pg::PgState>().svc.stop().await;
+        crate::redis::stop_redis(app).await;
     });
     server.dev.stop_all();
 }

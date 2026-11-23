@@ -9,6 +9,7 @@ pub mod mariadb;
 pub mod node;
 pub mod php;
 pub mod postgres;
+pub mod redis;
 pub mod s3;
 pub mod tools;
 

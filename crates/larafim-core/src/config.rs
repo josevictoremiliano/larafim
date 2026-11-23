@@ -55,6 +55,35 @@ pub struct AppConfig {
     /// Bancos que já existem no PC (MySQL/MariaDB do Laragon, XAMPP…).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub db_connections: Vec<DbConnection>,
+    /// Redis opcional (filas e cache), rodando no Docker ou no WSL2.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redis: Option<RedisConfig>,
+}
+
+/// Onde o Redis do Larafim roda: nativo no Windows (padrão), Docker ou WSL2.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RedisConfig {
+    /// "native", "docker" ou "wsl".
+    pub backend: String,
+    /// Distribuição do WSL (só com `backend = "wsl"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distro: Option<String>,
+    pub port: u16,
+}
+
+impl RedisConfig {
+    pub fn validate(&self) -> Result<()> {
+        match (self.backend.as_str(), &self.distro) {
+            ("native" | "docker", _) => {}
+            ("wsl", Some(d)) if crate::safety::is_wsl_distro(d) => {}
+            ("wsl", _) => return Err(Error::Invalid(crate::t!("escolha uma distribuição do WSL válida"))),
+            _ => return Err(Error::Invalid(crate::t!("o Redis roda nativo, no Docker ou no WSL2"))),
+        }
+        if self.port < 1024 {
+            return Err(Error::Invalid(crate::t!("porta inválida")));
+        }
+        Ok(())
+    }
 }
 
 /// Conexão com um servidor de banco que não é do Larafim.
@@ -117,6 +146,7 @@ impl Default for AppConfig {
             pg_port: 5432,
             s3_secret: None,
             db_connections: Vec::new(),
+            redis: None,
         }
     }
 }
@@ -157,6 +187,9 @@ impl AppConfig {
         }
         if self.http_port == 0 {
             return Err(Error::Invalid(crate::t!("a porta HTTP não pode ser 0")));
+        }
+        if let Some(r) = &self.redis {
+            r.validate()?;
         }
         Ok(())
     }
@@ -229,5 +262,20 @@ mod tests {
         assert_eq!(cfg.project_url("loja"), "http://loja.offline");
         cfg.http_port = 8080;
         assert_eq!(cfg.project_url("loja"), "http://loja.offline:8080");
+    }
+
+    #[test]
+    fn redis_config_is_validated() {
+        let ok = |backend: &str, distro: Option<&str>, port| RedisConfig { backend: backend.into(), distro: distro.map(String::from), port };
+        assert!(ok("native", None, 6379).validate().is_ok());
+        assert!(ok("docker", None, 6379).validate().is_ok());
+        assert!(ok("wsl", Some("Ubuntu-24.04"), 6380).validate().is_ok());
+        assert!(ok("wsl", None, 6379).validate().is_err());
+        assert!(ok("docker", None, 80).validate().is_err());
+        assert!(ok("podman", None, 6379).validate().is_err());
+        // Vai para `wsl -d <nome>`: nada de opções, espaços ou comandos.
+        for evil in ["-u root", "--exec calc", "Ubuntu & calc", "a\"b", "..\\x", ""] {
+            assert!(ok("wsl", Some(evil), 6379).validate().is_err(), "{evil:?}");
+        }
     }
 }

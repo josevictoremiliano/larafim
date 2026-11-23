@@ -44,6 +44,10 @@ pub struct Site {
     pub online: bool,
     /// Projeto Node: o gateway repassa tudo para o servidor de dev nessa porta.
     pub proxy: Option<crate::devserver::PortCell>,
+    /// Porta do Laravel Reverb do projeto: WebSocket em `/app/...` vai para lá.
+    /// Assim o navegador fala com o Reverb pelo mesmo domínio (e pelo HTTPS do
+    /// gateway): numa página https, `ws://127.0.0.1` seria bloqueado.
+    pub ws: Option<u16>,
 }
 
 /// Tabela domínio → projeto. Trocada a quente, sem reiniciar o gateway.
@@ -180,6 +184,12 @@ async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>, remote: SocketAddr) -> Re
         return Ok(html(StatusCode::SERVICE_UNAVAILABLE, pages::offline(&site.name)));
     }
 
+    if let Some(port) = site.ws
+        && is_reverb_socket(&req)
+    {
+        return Ok(crate::proxy::forward(req, port, &host, secure).await);
+    }
+
     if let Some(cell) = &site.proxy {
         let port = *cell.lock().unwrap();
         return Ok(match port {
@@ -201,6 +211,18 @@ async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>, remote: SocketAddr) -> Re
     };
     tracing::debug!(host, %path, status = response.status().as_u16(), "requisição");
     Ok(response)
+}
+
+/// Conexão WebSocket do Pusher/Echo para o Reverb: `GET /app/<chave>` com
+/// `Upgrade: websocket`. Requisições comuns em `/app/...` seguem para o PHP.
+fn is_reverb_socket<B>(req: &Request<B>) -> bool {
+    req.method() == Method::GET
+        && req.uri().path().starts_with("/app/")
+        && req
+            .headers()
+            .get(hyper::header::UPGRADE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
 }
 
 async fn serve_file(req: &Request<Incoming>, file: PathBuf) -> Response<Body> {

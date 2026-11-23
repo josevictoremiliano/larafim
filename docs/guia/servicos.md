@@ -60,7 +60,10 @@ PostgreSQL ou uma conexão existente. O Larafim:
 4. guarda o `.env` original em `.env.larafim.bak` na primeira mudança;
 5. altera só as chaves daquele serviço (`DB_*`, `MAIL_*`, `AWS_*`…).
 
-**Desfazer** restaura o `.env` a partir da cópia. Os valores são gravados de forma literal (o
+**Desfazer** restaura o `.env` a partir da cópia. Depois de qualquer mudança (ou de desfazer), se o
+projeto tiver a configuração em cache (`bootstrap/cache/config.php`), o Larafim roda
+`php artisan config:clear`, e os workers ligados (fila, agendador, Reverb) reiniciam para ler o `.env`
+novo. Os valores são gravados de forma literal (o
 Laravel não expande `${...}` neles) e nunca com quebra de linha.
 
 ### Backups
@@ -89,3 +92,20 @@ Um "S3 de mentira" para testar upload de arquivos como na AWS, sem custo. Usa o
 - A chave secreta é gerada no seu PC e guardada protegida pela DPAPI.
 - Ao usar num projeto, o Larafim cria um bucket com o nome do projeto e preenche `AWS_*` no `.env`.
 - O Laravel precisa do pacote `league/flysystem-aws-s3-v3`; o Larafim avisa quando falta.
+
+## Redis (filas e cache)
+
+Opcional. Em **Adicionar serviço › Filas e cache › Redis**, escolha onde ele roda:
+
+- **Windows (nativo)**, o padrão: o Larafim baixa o `redis-server.exe` (~14 MB) das compilações do
+  projeto [redis-windows](https://github.com/redis-windows/redis-windows), conferindo o SHA-256 do
+  release. O Redis oficial não publica binários para Windows.
+- **Docker**: contêiner `redis:7.4-alpine` com os dados num volume. O Docker Desktop precisa estar aberto.
+- **WSL2**: usa o `redis-server` da distribuição escolhida. Instale antes pelo
+  [repositório oficial](https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/install-redis-on-windows/)
+  (`sudo apt-get install redis`).
+
+Nos três casos ele escuta só em `127.0.0.1`, liga quando um projeto online precisa e desliga ao sair.
+No painel do projeto, **Serviços › Redis › Redis do Larafim (filas)** mostra a prévia e grava
+`QUEUE_CONNECTION=redis`, `REDIS_CLIENT=predis`, `REDIS_HOST` e `REDIS_PORT` no `.env` (com cópia). O
+Larafim não traz a extensão `phpredis`, então o projeto precisa do pacote `predis/predis`.

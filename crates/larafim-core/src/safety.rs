@@ -84,6 +84,23 @@ pub fn is_env_value(value: &str) -> bool {
     value.len() <= 4096 && !value.chars().any(char::is_control)
 }
 
+/// Nome de fila do Laravel aceitável como argumento (`--queue=a,b`): sem
+/// vírgula (separaria outra fila), espaço, aspas ou `-` no começo (viraria opção).
+pub fn is_queue_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 100
+        && !name.starts_with('-')
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+}
+
+/// Nome de distribuição do WSL (sai de `wsl -l`): vira argumento de `wsl -d`.
+pub fn is_wsl_distro(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with(['-', '.'])
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +193,27 @@ mod tests {
         assert!(is_env_value("p@ss w0rd $x \"q\" \\"));
         for bad in ["a\nEVIL=1", "a\rb", "a\0", "\u{1b}[31m"] {
             assert!(!is_env_value(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn queue_names() {
+        for ok in ["default", "whatsapp-inbound", "suppliers_fast", "emails.high", "tenant:1"] {
+            assert!(is_queue_name(ok), "{ok}");
+        }
+        for bad in ["", "a,b", "a b", "--tries=0", "-x", "a\"b", "a;b", "a&b", "a|b", "<script>", "a\r\nb", "%PATH%", "é"] {
+            assert!(!is_queue_name(bad), "{bad:?}");
+        }
+        assert!(!is_queue_name(&"a".repeat(101)));
+    }
+
+    #[test]
+    fn wsl_distros() {
+        for ok in ["Ubuntu", "Ubuntu-24.04", "Debian", "my_distro"] {
+            assert!(is_wsl_distro(ok), "{ok}");
+        }
+        for bad in ["", "-u root", "--exec", "a b", "a&calc", "a\"b", "..\\x", ".x", "a;b", "a\0"] {
+            assert!(!is_wsl_distro(bad), "{bad:?}");
         }
     }
 }

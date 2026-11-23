@@ -129,6 +129,15 @@ pub fn service_info(app: AppHandle, service: String, project: Option<PathBuf>) -
                     .collect(),
             }
         }
+        "redis" => {
+            let port = crate::redis::redis_config(&app).map(|r| r.port).unwrap_or(larafim_core::redis::DEFAULT_PORT);
+            ServiceInfo {
+                data_dir: Some(crate::redis::data_dir(&app)),
+                log_file: None,
+                log: dev_tail(&app, crate::redis::REDIS_KEY),
+                env: larafim_core::redis::env_changes(port).into_iter().map(|c| (c.key, c.value.unwrap_or_default())).collect(),
+            }
+        }
         other => {
             let id = other.strip_prefix("conn:").ok_or_else(|| format!("serviço desconhecido: {other}"))?;
             let c = crate::dbconn::find(&app, id)?;

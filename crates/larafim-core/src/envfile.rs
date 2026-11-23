@@ -42,9 +42,10 @@ fn key_of(line: &str) -> Option<&str> {
     (!k.is_empty() && !k.starts_with('#') && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')).then_some(k)
 }
 
-/// Valor atual de uma chave (ativa, não comentada).
+/// Valor atual de uma chave (ativa, não comentada). Se a chave aparecer
+/// repetida, vale a última, como no phpdotenv e no Vite.
 pub fn get(text: &str, key: &str) -> Option<String> {
-    text.lines().find(|l| key_of(l) == Some(key)).map(|l| {
+    text.lines().rev().find(|l| key_of(l) == Some(key)).map(|l| {
         let v = l.split_once('=').map(|(_, v)| v.trim()).unwrap_or_default();
         unquote(v)
     })
@@ -116,8 +117,18 @@ pub fn apply(text: &str, changes: &[EnvChange]) -> (String, Vec<DiffLine>) {
             continue;
         }
         let idx = lines.iter().position(|l| key_of(l) == Some(ch.key.as_str()));
+        // Linhas repetidas da mesma chave: todas recebem a mudança (senão a
+        // última, que é a que vale, continuaria com o valor antigo).
+        let dups: Vec<usize> = match idx {
+            Some(first) => (first + 1..lines.len()).filter(|&i| key_of(&lines[i]) == Some(ch.key.as_str())).collect(),
+            None => Vec::new(),
+        };
         match (&ch.value, idx) {
-            (Some(v), Some(i)) => lines[i] = format!("{}={}", ch.key, quote(v)),
+            (Some(v), Some(i)) => {
+                for j in std::iter::once(i).chain(dups) {
+                    lines[j] = format!("{}={}", ch.key, quote(v));
+                }
+            }
             (Some(v), None) => {
                 // Reaproveita uma linha comentada da mesma chave, se houver.
                 let commented = lines.iter().position(|l| {
@@ -128,7 +139,11 @@ pub fn apply(text: &str, changes: &[EnvChange]) -> (String, Vec<DiffLine>) {
                     None => lines.push(format!("{}={}", ch.key, quote(v))),
                 }
             }
-            (None, Some(i)) => lines[i] = format!("# {}", lines[i]),
+            (None, Some(i)) => {
+                for j in std::iter::once(i).chain(dups) {
+                    lines[j] = format!("# {}", lines[j]);
+                }
+            }
             (None, None) => continue,
         }
         diff.push(DiffLine { key: ch.key.clone(), before, after: ch.value.clone() });
@@ -233,6 +248,17 @@ mod tests {
         undo(tmp.path()).unwrap();
         assert_eq!(std::fs::read_to_string(tmp.path().join(".env")).unwrap(), ENV);
         assert!(!has_backup(tmp.path()));
+    }
+
+    #[test]
+    fn repeated_keys_all_change_and_last_wins() {
+        let env = "REVERB_PORT=8080\nA=1\nREVERB_PORT=6009\n";
+        assert_eq!(get(env, "REVERB_PORT").as_deref(), Some("6009"));
+        let (out, diff) = apply(env, &[EnvChange::set("REVERB_PORT", "8081")]);
+        assert_eq!(out, "REVERB_PORT=8081\nA=1\nREVERB_PORT=8081\n");
+        assert_eq!(diff[0].before.as_deref(), Some("6009"));
+        let (out, _) = apply(env, &[EnvChange::unset("REVERB_PORT")]);
+        assert_eq!(get(&out, "REVERB_PORT"), None, "{out}");
     }
 
     // ---------- Injeção ----------

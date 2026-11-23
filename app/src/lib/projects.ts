@@ -12,6 +12,8 @@ export interface Project {
   kind: ProjectKind;
   status: ProjectStatus;
   domain: string;
+  /** Domínios extras, sem o TLD (`finder.noveck` → finder.noveck.local). */
+  aliases: string[];
   docroot: string;
   /** Minor do PHP fixado; `null` = automático. */
   php_pin: string | null;
@@ -30,6 +32,12 @@ export interface Project {
   mail: string | null;
   storage: string | null;
   workers: string[];
+  /** Porta do Reverb escolhida pelo Larafim; `null` = ainda não ligado. */
+  reverb_port: number | null;
+  /** Filas do worker (`--queue=`); vazio = descobrir ao ligar. */
+  queues: string[];
+  /** Conexão do worker de fila: "redis" (Redis do Larafim) ou `null` (a do .env). */
+  queue_connection: string | null;
   online: boolean;
 }
 
@@ -104,6 +112,7 @@ const sample = (
   kind,
   status,
   domain: name,
+  aliases: [],
   docroot: kind === "node" ? "" : "public",
   php_pin: null,
   php_request,
@@ -118,6 +127,9 @@ const sample = (
   mail: null,
   storage: null,
   workers: [],
+  reverb_port: null,
+  queues: [],
+  queue_connection: null,
   online: false,
 });
 
@@ -177,6 +189,11 @@ const mock = {
         : [...mockProjects, updated(sample(config.path.split("\\").pop()!, "laravel", "imported", "^8.3", false, null))];
     });
   },
+  setAliases: async (path: string, aliases: string[]) => {
+    const taken = mockProjects.find((p) => p.path !== path && aliases.some((a) => a === p.domain || p.aliases.includes(a)));
+    if (taken) throw `o domínio já é usado por outro projeto`;
+    return mockChange(() => (mockProjects = mockProjects.map((p) => (p.path === path ? { ...p, aliases } : p))));
+  },
   remove: async (path: string) =>
     mockChange(() => {
       const p = mockProjects.find((x) => x.path === path);
@@ -223,6 +240,8 @@ export const projectsApi = inTauri
       import: (path: string) => invoke<ProjectsOverview>("import_project", { path }),
       importAll: () => invoke<ProjectsOverview>("import_all"),
       save: (config: ProjectConfig) => invoke<ProjectsOverview>("save_project", { config }),
+      setAliases: (path: string, aliases: string[]) =>
+        invoke<ProjectsOverview>("set_project_aliases", { path, aliases }),
       remove: (path: string) => invoke<ProjectsOverview>("remove_project", { path }),
       ignore: (path: string) => invoke<ProjectsOverview>("ignore_project", { path }),
       unignore: (path: string) => invoke<ProjectsOverview>("unignore_project", { path }),

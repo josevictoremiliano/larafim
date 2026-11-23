@@ -1,12 +1,14 @@
 <script lang="ts" module>
   export type AddChoice =
     | { kind: "mariadb" | "postgres"; major: string; port: number }
+    | { kind: "redis"; backend: "native" | "docker" | "wsl"; distro: string | null; port: number }
     | { kind: "existing" | "mailpit" | "s3" };
 </script>
 
 <script lang="ts">
   import { t } from "../lib/i18n.svelte";
   import Glyph, { type GlyphName } from "../lib/Glyph.svelte";
+  import type { RedisStatus } from "../lib/redis";
 
   type Row = { major: string; latest: string | null; installed: string | null };
 
@@ -18,6 +20,7 @@
     pgPort,
     mailInstalled,
     s3Installed,
+    redisStatus,
     onclose,
     onadd,
   }: {
@@ -27,11 +30,12 @@
     pgPort: number;
     mailInstalled: boolean;
     s3Installed: boolean;
+    redisStatus: RedisStatus | null;
     onclose: () => void;
     onadd: (choice: AddChoice) => void;
   } = $props();
 
-  type Tab = "db" | "mail" | "storage";
+  type Tab = "db" | "mail" | "storage" | "cache";
   type Kind = AddChoice["kind"];
   interface Card {
     kind: Kind;
@@ -50,18 +54,22 @@
     { kind: "existing", tab: "db", name: t("Banco que já tenho"), sub: t("MySQL ou MariaDB"), icon: "link", done: false },
     { kind: "mailpit", tab: "mail", name: "Mailpit", sub: mailInstalled ? t("Instalado") : t("Caixa de e-mails local"), icon: "mail", done: mailInstalled },
     { kind: "s3", tab: "storage", name: t("Storage S3"), sub: s3Installed ? t("Instalado") : "RustFS", icon: "package", done: s3Installed },
+    { kind: "redis", tab: "cache", name: "Redis", sub: redisStatus?.config ? t("Instalado") : t("Nativo, Docker ou WSL2"), icon: "server", done: !!redisStatus?.config },
   ]);
 
   const tabs: { id: Tab; label: () => string }[] = [
     { id: "db", label: () => t("Banco de dados") },
     { id: "mail", label: () => t("E-mail") },
     { id: "storage", label: () => t("Storage") },
+    { id: "cache", label: () => t("Filas e cache") },
   ];
 
   let tab = $state<Tab>("db");
   let kind = $state<Kind | null>(null);
   let major = $state("");
   let port = $state(0);
+  let backend = $state<"native" | "docker" | "wsl">("native");
+  let distro = $state("");
 
   const visible = $derived(cards.filter((c) => c.tab === tab));
   const versions = $derived(kind === "mariadb" ? free(maria) : kind === "postgres" ? free(pg) : []);
@@ -72,6 +80,11 @@
     if (c.kind === "mariadb" || c.kind === "postgres") {
       major = versions[0]?.major ?? "";
       port = c.kind === "mariadb" ? mariaPort : pgPort;
+    }
+    if (c.kind === "redis") {
+      port = 6379;
+      backend = "native";
+      distro = redisStatus?.distros[0] ?? "";
     }
   }
 
@@ -92,12 +105,18 @@
 
   const portOk = $derived(Number.isInteger(Number(port)) && Number(port) >= 1024 && Number(port) <= 65535);
   const canAdd = $derived(
-    kind !== null && (kind === "mariadb" || kind === "postgres" ? !!major && portOk : true),
+    kind !== null &&
+      (kind === "mariadb" || kind === "postgres"
+        ? !!major && portOk
+        : kind === "redis"
+          ? portOk && (backend === "docker" || !!distro)
+          : true),
   );
 
   function add() {
     if (!kind || !canAdd) return;
     if (kind === "mariadb" || kind === "postgres") onadd({ kind, major, port: Number(port) });
+    else if (kind === "redis") onadd({ kind, backend, distro: backend === "wsl" ? distro : null, port: Number(port) });
     else onadd({ kind });
   }
 </script>
@@ -153,6 +172,40 @@
         <p class="caption hint">{t("Caixa de e-mails local: tudo que os projetos enviam fica aqui, nada sai para a internet")}</p>
       {:else if kind === "s3"}
         <p class="caption hint">{t("Testar upload de arquivos como na AWS, sem custo (RustFS, ~118 MB)")}</p>
+      {:else if kind === "redis"}
+        <div class="row">
+          <span>{t("Rodar no")}</span>
+          <div class="select">
+            <select bind:value={backend}>
+              <option value="native">{t("Windows (nativo)")}</option>
+              <option value="docker">Docker</option>
+              <option value="wsl" disabled={!redisStatus?.distros.length}>WSL2</option>
+            </select>
+          </div>
+        </div>
+        {#if backend === "wsl"}
+          <div class="row">
+            <span>{t("Distribuição")}</span>
+            <div class="select">
+              <select bind:value={distro}>
+                {#each redisStatus?.distros ?? [] as d (d)}<option value={d}>{d}</option>{/each}
+              </select>
+            </div>
+          </div>
+        {/if}
+        <div class="row">
+          <span>{t("Porta")}</span>
+          <input class="input" type="number" min="1024" max="65535" bind:value={port} />
+        </div>
+        <p class="caption hint">
+          {backend === "native"
+            ? t("Baixa o redis-server.exe para Windows (~14 MB, redis-windows no GitHub, com SHA-256). Roda só em 127.0.0.1, sem Docker nem WSL.")
+            : backend === "docker"
+            ? redisStatus?.docker
+              ? t("Contêiner {image}, só em 127.0.0.1. O Docker Desktop precisa estar aberto.", { image: redisStatus.image })
+              : t("Docker não encontrado: instale o Docker Desktop ou use o WSL2.")
+            : t("Precisa do Redis na distribuição, instalado pelo repositório oficial packages.redis.io (sudo apt-get install redis).")}
+        </p>
       {/if}
     </div>
     <div class="footer">
@@ -210,6 +263,8 @@
   .tab {
     flex: 1;
     height: 30px;
+    padding: 0 6px;
+    white-space: nowrap;
     border: 1px solid transparent;
     border-radius: calc(var(--r-ctrl) - 1px);
     background: transparent;

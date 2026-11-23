@@ -164,6 +164,23 @@ fn node_command(dir: &Path, package: &serde_json::Value) -> Option<String> {
     })
 }
 
+/// Pasta escolhida à mão → raiz do projeto. Quem escolhe a `public` de um
+/// Laravel quer o projeto inteiro: senão o Larafim o veria como PHP simples
+/// (sem `artisan`, sem workers) e serviria a pasta errada.
+pub fn project_root(dir: &Path) -> PathBuf {
+    let Some(parent) = dir.parent() else { return dir.to_path_buf() };
+    if detect(dir, parent).is_some_and(|d| d.kind == ProjectKind::Laravel) {
+        return dir.to_path_buf();
+    }
+    let grand = parent.parent().unwrap_or(parent);
+    match (dir.file_name(), detect(parent, grand)) {
+        (Some(name), Some(p)) if p.kind == ProjectKind::Laravel && name.eq_ignore_ascii_case(p.docroot.as_str()) => {
+            parent.to_path_buf()
+        }
+        _ => dir.to_path_buf(),
+    }
+}
+
 /// Pastas que podem servir de pasta pública. `""` é a raiz do projeto.
 pub fn docroot_options(dir: &Path) -> Vec<String> {
     let mut options = vec![String::new()];
@@ -287,6 +304,27 @@ mod tests {
     #[test]
     fn missing_root_is_ignored() {
         assert!(scan_roots(&[PathBuf::from(r"Z:\nao\existe")]).is_empty());
+    }
+
+    #[test]
+    fn public_folder_points_to_laravel_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("autoai");
+        write(&app, "artisan", "");
+        write(&app, "composer.json", "{}");
+        write(&app, "public/index.php", "");
+        assert_eq!(project_root(&app.join("public")), app);
+        assert_eq!(project_root(&app), app);
+        // Outra subpasta, ou `public` de um PHP simples: fica como escolhida.
+        fs::create_dir_all(app.join("storage")).unwrap();
+        assert_eq!(project_root(&app.join("storage")), app.join("storage"));
+        let site = tmp.path().join("site");
+        write(&site, "public/index.php", "");
+        assert_eq!(project_root(&site.join("public")), site.join("public"));
+        // Nomes hostis não sobem de pasta.
+        for evil in ["..", "public.", "CON", "PUBLIC~1"] {
+            assert_ne!(project_root(&app.join(evil)), app, "{evil}");
+        }
     }
 
     #[test]

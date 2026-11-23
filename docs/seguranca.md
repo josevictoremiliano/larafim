@@ -42,7 +42,8 @@ Código: [`download.rs`](../crates/larafim-runtimes/src/download.rs),
   servidor (nem com truques como `github.com@evil.com`).
 - **SHA-256 obrigatório.** O hash vem da fonte oficial (catálogo do PHP, `SHASUMS256.txt` do Node, API
   da MariaDB, campo `digest` do GitHub) ou fica fixo no código (Adminer). O arquivo é gravado como
-  `.part` e só vira "pronto" depois de conferido.
+  `.part` e só vira "pronto" depois de conferido. O Redis nativo vem só de
+  `github.com/redis-windows/redis-windows`, com URL e nome do pacote conferidos e o `digest` do release.
 - **Versões viram nomes de pasta só se forem seguras.** Versões e tags lidas dos catálogos passam por
   `is_safe_component`: nada de `..`, `/`, `\`, `:`, nomes reservados do Windows ou caracteres
   estranhos. Isso importa porque reinstalar uma versão apaga a pasta antiga.
@@ -78,6 +79,11 @@ Código: [`envfile.rs`](../crates/larafim-core/src/envfile.rs).
   valor tiver aspas simples, vai entre aspas duplas com `\`, `"` e `$` escapados. `${APP_KEY}` não é
   expandido e uma `\` no fim não quebra o arquivo.
 - Antes da primeira mudança, o `.env` original vai para `.env.larafim.bak` (**Desfazer**).
+- Reverb ([`reverb.rs`](../crates/larafim-core/src/reverb.rs)): valores já existentes no `.env` do
+  projeto (a chave do app, copiada para `VITE_REVERB_APP_KEY`) passam pela mesma validação e
+  escape; a porta vem só da faixa 8080–8179, nunca do arquivo.
+- Chaves repetidas: todas as linhas da chave recebem o valor novo, e a leitura usa a última (a que o
+  phpdotenv e o Vite usam). Antes, uma linha repetida mais abaixo continuava valendo.
 
 ### Bancos de dados
 
@@ -164,11 +170,12 @@ Código: [`app_update.rs`](../crates/larafim-runtimes/src/app_update.rs),
 | Proteção | Teste |
 |---|---|
 | Nomes seguros, URLs, SHA-256, `.env`, endereços locais | `larafim-core` › `safety::tests::*` |
-| Injeção no `.env` | `envfile::tests::newline_in_value_cannot_create_variables`, `bad_keys_are_refused`, `values_are_literal`, `write_refuses_injection` |
+| Injeção no `.env` | `envfile::tests::newline_in_value_cannot_create_variables`, `bad_keys_are_refused`, `values_are_literal`, `write_refuses_injection`, `reverb::tests::hostile_env_cannot_inject_lines` |
 | Domínios e sufixo | `hosts::tests::host_validation`, `config::tests::rejects_bad_tld` |
 | Só fontes oficiais | `download::tests::only_official_sources`, `refuses_before_connecting` |
 | Zips maliciosos | `archive::tests::refuses_path_traversal`, `refuses_symlinks`, `refuses_zip_bomb`, `refuses_too_many_entries`, `refuses_garbage` |
-| Catálogos adulterados | `mariadb::tests::tampered_catalog_is_ignored`, `php::catalog::tests::picks_nts_x64_sorted_and_rejects_unsafe_paths`, `postgres::tests::skips_without_digest` |
+| Catálogos adulterados | `mariadb::tests::tampered_catalog_is_ignored`, `php::catalog::tests::picks_nts_x64_sorted_and_rejects_unsafe_paths`, `postgres::tests::skips_without_digest`, `redis::tests::tampered_release_is_refused` |
+| Filas e WSL na linha de comando | `safety::tests::queue_names`, `wsl_distros`, `queues::tests::hostile_names_never_become_arguments`, `redis::tests::hostile_wsl_names_are_dropped`, `config::tests::redis_config_is_validated` |
 | Caminhos no servidor local | `resolve::tests::protections`, `windows_name_tricks` |
 | XSS nas páginas do gateway | `pages::tests::request_data_is_escaped` |
 | CA restrita ao domínio local | `tls::tests::ca_issues_only_inside_tld` |

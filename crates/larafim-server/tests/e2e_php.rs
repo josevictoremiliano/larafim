@@ -57,11 +57,12 @@ echo 'EXT ', extension_loaded('mbstring') ? 'mbstring' : 'sem', "\n";
             php_missing: false,
             online: true,
             proxy: None,
+            ws: None,
         },
     );
     routes.write().unwrap().sites.insert(
         "parado.offline".into(),
-        Site { name: "parado".into(), docroot: public.clone(), php: None, php_missing: false, online: false, proxy: None },
+        Site { name: "parado".into(), docroot: public.clone(), php: None, php_missing: false, online: false, proxy: None, ws: None },
     );
 
     let pools = Pools::new(PoolSettings { workers: 2, ..Default::default() });

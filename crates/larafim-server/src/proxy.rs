@@ -115,7 +115,7 @@ mod tests {
         let cell = Arc::new(Mutex::new(None));
         routes.write().unwrap().sites.insert(
             "app.offline".into(),
-            Site { name: "app".into(), docroot: ".".into(), php: None, php_missing: false, online: true, proxy: Some(cell.clone()) },
+            Site { name: "app".into(), docroot: ".".into(), php: None, php_missing: false, online: true, proxy: Some(cell.clone()), ws: None },
         );
         let gw_port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let gw = Gateway::start(gw_port, routes, Pools::new(PoolSettings::default())).await.unwrap();
@@ -144,6 +144,51 @@ mod tests {
         s.write_all(b"ping-hmr").await.unwrap();
         let n = s.read(&mut buf).await.unwrap();
         assert_eq!(&buf[..n], b"ping-hmr");
+        gw.stop();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reverb_socket_goes_to_its_port_only() {
+        let reverb_port = fake_dev_server().await;
+        let docroot = tempfile::tempdir().unwrap();
+        let routes = Arc::new(RwLock::new(Routes::default()));
+        routes.write().unwrap().sites.insert(
+            "loja.offline".into(),
+            Site {
+                name: "loja".into(),
+                docroot: docroot.path().to_path_buf(),
+                php: None,
+                php_missing: false,
+                online: true,
+                proxy: None,
+                ws: Some(reverb_port),
+            },
+        );
+        let gw_port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let gw = Gateway::start(gw_port, routes, Pools::new(PoolSettings::default())).await.unwrap();
+        let send = |req: &'static [u8]| async move {
+            let mut s = tokio::net::TcpStream::connect(("127.0.0.1", gw_port)).await.unwrap();
+            s.write_all(req).await.unwrap();
+            let mut buf = vec![0u8; 1024];
+            let n = s.read(&mut buf).await.unwrap();
+            (s, String::from_utf8_lossy(&buf[..n]).to_string())
+        };
+
+        // WebSocket do Echo em /app/<chave>: vai para o Reverb.
+        let (mut s, head) =
+            send(b"GET /app/chave?protocol=7 HTTP/1.1\r\nHost: loja.offline\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n").await;
+        assert!(head.starts_with("HTTP/1.1 101"), "{head}");
+        s.write_all(b"pusher").await.unwrap();
+        let mut buf = vec![0u8; 64];
+        let n = s.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"pusher");
+
+        // Sem upgrade, ou upgrade fora de /app/: não vai para o Reverb.
+        let (_, plain) = send(b"GET /app/chave HTTP/1.1\r\nHost: loja.offline\r\nConnection: close\r\n\r\n").await;
+        assert!(!plain.contains("dev ok"), "{plain}");
+        let (_, other) =
+            send(b"GET /../app/x HTTP/1.1\r\nHost: loja.offline\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n").await;
+        assert!(!other.starts_with("HTTP/1.1 101"), "{other}");
         gw.stop();
     }
 }

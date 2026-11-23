@@ -33,6 +33,14 @@ export interface XdebugInfo {
 export type Worker = "queue" | "schedule" | "reverb";
 export type Kit = "none" | "react" | "vue" | "livewire";
 
+export interface ReverbPreview {
+  installed: boolean;
+  port: number;
+  diff: DiffLine[];
+  from_example: boolean;
+  no_env: boolean;
+}
+
 export interface NewLaravel {
   name: string;
   root: string;
@@ -103,7 +111,22 @@ const mock = {
     status: { key, state: "running", port: null, exit_code: null, command: "php artisan queue:work" },
     logs: ["INFO  Processing jobs from the [default] queue."],
   }),
-  hasReverb: async (_path: string) => false,
+  hasReverb: async (_path: string) => true,
+  installReverb: async (_path: string) => {},
+  queuesDiscover: async (_path: string) => ["default", "whatsapp-inbound", "whatsapp", "chat"],
+  queuesSet: async (_path: string, text: string) => text.split(",").map((q) => q.trim()).filter(Boolean),
+  reverbPreview: async (_path: string): Promise<ReverbPreview> => ({
+    installed: true,
+    port: 8081,
+    diff: [
+      { key: "BROADCAST_CONNECTION", before: "log", after: "reverb" },
+      { key: "REVERB_HOST", before: "localhost", after: "127.0.0.1" },
+      { key: "REVERB_PORT", before: "8080", after: "8081" },
+      { key: "REVERB_SERVER_PORT", before: null, after: "8081" },
+    ],
+    from_example: false,
+    no_env: false,
+  }),
   xdebugInfo: async (_v: string): Promise<XdebugInfo> => ({
     downloaded: xdebugOn,
     enabled: xdebugOn,
@@ -136,6 +159,10 @@ export const toolsApi = inTauri
       workerRestart: (path: string, worker: Worker) => invoke<void>("worker_restart", { path, worker }),
       processInfo: (key: string) => invoke<DevInfo>("process_info", { key }),
       hasReverb: (path: string) => invoke<boolean>("has_reverb", { path }),
+      installReverb: (path: string) => invoke<void>("project_install_reverb", { path }),
+      reverbPreview: (path: string) => invoke<ReverbPreview>("reverb_preview", { path }),
+      queuesDiscover: (path: string) => invoke<string[]>("queues_discover", { path }),
+      queuesSet: (path: string, text: string) => invoke<string[]>("queues_set", { path, text }),
       xdebugInfo: (version: string) => invoke<XdebugInfo>("xdebug_info", { version }),
       xdebugSet: (version: string, enabled: boolean) => invoke<XdebugInfo>("xdebug_set", { version, enabled }),
       laravelCreate: (input: NewLaravel) => invoke<string>("laravel_create", { input }),
