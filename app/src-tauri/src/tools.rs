@@ -479,9 +479,10 @@ pub fn start_workers(app: &AppHandle, view: &ProjectView) {
             let (app, view) = (app.clone(), view.clone());
             tauri::async_runtime::spawn(async move {
                 let found = discover_queues(&app, &view).await;
+                // O projeto pode ter sido desligado durante a descoberta.
                 let started = update_project(&app, &view.path, |p| p.queues = found)
                     .and_then(|_| view_of(&app, &view.path))
-                    .and_then(|v| start_worker(&app, &v, "queue"));
+                    .and_then(|v| if v.online { start_worker(&app, &v, "queue") } else { Ok(()) });
                 if let Err(e) = started {
                     tracing::warn!(project = view.name, "worker de fila não iniciou: {e}");
                 }
@@ -867,6 +868,11 @@ async fn reverb_enable(app: &AppHandle, path: &Path) -> Result<(), String> {
     }) {
         app.state::<ServerState>().dev.stop(&worker_key(path, "reverb"));
         return Err(error);
+    }
+    // Com o projeto offline o Reverb só sobe para validar a configuração:
+    // ele roda junto com o projeto, então desliga até o projeto ficar online.
+    if !view.online {
+        app.state::<ServerState>().dev.stop(&worker_key(path, "reverb"));
     }
     tracing::info!(path = %path.display(), port, "Reverb do projeto ligado");
     // Rotas novas: o gateway passa a repassar o WebSocket para a porta.

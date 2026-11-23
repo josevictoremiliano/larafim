@@ -456,6 +456,7 @@ pub async fn set_project_online(app: AppHandle, path: PathBuf, online: bool) -> 
     if let Err(e) = refresh(&app).await {
         // Não deu para ligar o servidor: o projeto volta a ficar offline.
         app.state::<ServerState>().dev.stop(&dev_key(&path));
+        crate::tools::stop_workers(&app, &path);
         let _ = set_online_flag(&app, &path, false);
         let _ = refresh(&app).await;
         notify_projects(&app);

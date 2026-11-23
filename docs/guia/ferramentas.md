@@ -45,8 +45,9 @@ Ligar o **Reverb** configura tudo de uma vez:
    Assim funciona também em páginas `https://`, onde o navegador bloquearia `ws://127.0.0.1`.
    Chaves repetidas no `.env` são todas atualizadas (vale a última, como no Laravel e no Vite);
 4. liga o banco do projeto, se preciso (o `reverb:start` lê o cache), e inicia na hora
-   (`reverb:start --host=127.0.0.1 --port=<porta>`), mesmo com o projeto offline. O Larafim aguarda
-   o servidor responder antes de marcar o Reverb como ligado.
+   (`reverb:start --host=127.0.0.1 --port=<porta>`). O Larafim aguarda o servidor responder antes de
+   marcar o Reverb como ligado. Com o projeto offline, o teste é feito e o Reverb é desligado em
+   seguida: ele roda junto com o projeto e para quando o projeto é desligado ou removido.
 
 Se o cache do Laravel usa o banco, o Reverb precisa da tabela de cache para iniciar. Confira as
 migrations pendentes com `php artisan migrate:status` e aplique as necessárias no banco de

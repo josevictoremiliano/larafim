@@ -132,6 +132,9 @@ pub fn save_project(app: AppHandle, state: State<'_, AppState>, config: ProjectC
 /// Tira do Larafim. Os arquivos do projeto não são apagados.
 #[tauri::command]
 pub fn remove_project(app: AppHandle, state: State<'_, AppState>, path: PathBuf) -> CmdResult<ProjectsOverview> {
+    // Projeto fora da lista não pode deixar processos (Vite, filas, Reverb) para trás.
+    tauri::Manager::state::<crate::server::ServerState>(&app).dev.stop(&crate::server::dev_key(&path));
+    crate::tools::stop_workers(&app, &path);
     let data = change(&app, &state, |store, roots| {
         store.remove(&path, roots);
         Ok(())
