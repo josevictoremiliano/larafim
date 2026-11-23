@@ -74,25 +74,33 @@
 {/if}
 
 <h2 class="subhead">{t("Atualizações")}</h2>
-<SettingRow icon="refresh" title={updateTitle} description={updateDescription}>
-  {#if status?.available}
-    <button class="btn accent" onclick={() => open("update")}><Glyph name="openExternal" /> {t("Baixar")}</button>
-  {/if}
-  <button class="btn" disabled={status?.checking} onclick={check}>{t("Verificar atualizações")}</button>
-</SettingRow>
-{#if app.config}
+{#if status?.store}
   <SettingRow
-    icon="globe"
-    title={t("Verificar automaticamente")}
-    description={t("Consulta o GitHub ao abrir e a cada 6 horas. Só avisa; nada é baixado sozinho.")}
-  >
-    <span class="caption">{app.config.check_updates ? t("Ativado") : t("Desativado")}</span>
-    <Toggle
-      label={t("Verificar automaticamente")}
-      checked={app.config.check_updates}
-      onchange={(v) => app.update({ check_updates: v })}
-    />
+    icon="refresh"
+    title={t("Atualizado pela Microsoft Store")}
+    description={t("A Store instala as versões novas do Larafim automaticamente.")}
+  />
+{:else}
+  <SettingRow icon="refresh" title={updateTitle} description={updateDescription}>
+    {#if status?.available}
+      <button class="btn accent" onclick={() => open("update")}><Glyph name="openExternal" /> {t("Baixar")}</button>
+    {/if}
+    <button class="btn" disabled={status?.checking} onclick={check}>{t("Verificar atualizações")}</button>
   </SettingRow>
+  {#if app.config}
+    <SettingRow
+      icon="globe"
+      title={t("Verificar automaticamente")}
+      description={t("Consulta o GitHub ao abrir e a cada 6 horas. Só avisa; nada é baixado sozinho.")}
+    >
+      <span class="caption">{app.config.check_updates ? t("Ativado") : t("Desativado")}</span>
+      <Toggle
+        label={t("Verificar automaticamente")}
+        checked={app.config.check_updates}
+        onchange={(v) => app.update({ check_updates: v })}
+      />
+    </SettingRow>
+  {/if}
 {/if}
 
 <h2 class="subhead">{t("Projeto")}</h2>

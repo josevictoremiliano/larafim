@@ -757,5 +757,7 @@
   "projeto {a} não está importado": "project {a} is not imported",
   "\"{a}\" já é o domínio principal deste projeto": "\"{a}\" is already this project's main domain",
   "domínio extra \"{a}\" inválido: use letras minúsculas, números, hífen e ponto": "invalid extra domain \"{a}\": use lowercase letters, numbers, hyphens and dots",
-  "domínio extra \"{a}\" reservado para um serviço do Larafim": "extra domain \"{a}\" is reserved for a Larafim service"
+  "domínio extra \"{a}\" reservado para um serviço do Larafim": "extra domain \"{a}\" is reserved for a Larafim service",
+  "Atualizado pela Microsoft Store": "Updated by the Microsoft Store",
+  "A Store instala as versões novas do Larafim automaticamente.": "The Store installs new versions of Larafim automatically."
 }

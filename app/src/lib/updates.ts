@@ -10,6 +10,8 @@ export interface UpdateStatus {
   checked_at: number | null;
   checking: boolean;
   error: string | null;
+  /** Instalado pela Microsoft Store: as atualizações vêm de lá. */
+  store: boolean;
 }
 
 /** Links fixos do projeto; o endereço sai do Rust, nunca da interface. */
@@ -23,6 +25,7 @@ let mockStatus: UpdateStatus = {
   checked_at: null,
   checking: false,
   error: null,
+  store: false,
 };
 
 const mock = {

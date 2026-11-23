@@ -1,6 +1,7 @@
 //! Versão nova do Larafim: confere a última release no GitHub ao abrir e a
 //! cada 6 horas (se a opção estiver ligada) e avisa as janelas. A pessoa
 //! baixa pela página da release; o app não baixa nem executa nada sozinho.
+//! Instalado pela Microsoft Store, quem atualiza é a Store: nada é consultado.
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -27,6 +28,8 @@ pub struct UpdateStatus {
     pub checked_at: Option<u64>,
     pub checking: bool,
     pub error: Option<String>,
+    /// Instalado pela Microsoft Store: as atualizações vêm de lá.
+    pub store: bool,
     /// Página da release (só deste repositório; validada em `parse_latest`).
     #[serde(skip)]
     pub url: Option<String>,
@@ -42,10 +45,14 @@ fn now() -> u64 {
 fn snapshot(app: &AppHandle) -> UpdateStatus {
     let mut s = app.state::<UpdateState>().0.lock().unwrap().clone();
     s.current = CURRENT.into();
+    s.store = crate::packaged::is_packaged();
     s
 }
 
 async fn check(app: &AppHandle) -> UpdateStatus {
+    if crate::packaged::is_packaged() {
+        return snapshot(app);
+    }
     app.state::<UpdateState>().0.lock().unwrap().checking = true;
     let _ = app.emit("app:update", snapshot(app));
     let result = match larafim_runtimes::http_client() {
@@ -85,6 +92,9 @@ async fn check(app: &AppHandle) -> UpdateStatus {
 
 /// Verificação automática: 20 s depois de abrir e a cada 6 horas.
 pub fn start_checker(app: AppHandle) {
+    if crate::packaged::is_packaged() {
+        return;
+    }
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(20)).await;
         loop {

@@ -3,6 +3,27 @@
 As versões do Larafim e o que mudou em cada uma. O instalador de cada versão fica em
 [Releases](https://github.com/josevictoremiliano/larafim/releases).
 
+## v0.1.2
+
+### Novidades
+
+- **Reverb por projeto:** porta própria, credenciais no `.env` (com prévia) e liga e desliga junto
+  com o projeto.
+- **Filas descobertas no projeto:** o Larafim encontra as filas usadas no código e sobe um worker para
+  cada uma.
+- **Redis gerenciado:** Redis nativo para Windows, sem WSL, baixado com versão e SHA-256 fixos.
+- **Domínios extras (aliases)** por projeto.
+- **Novo Laravel** cria projetos no Laravel 13 (PHP 8.3 a 8.5).
+- **Pacote para a Microsoft Store (MSIX).** Instalado pela Store, o Larafim é atualizado por ela e não
+  consulta o GitHub.
+
+### Correções
+
+- Reverb e workers de fila param quando o projeto é desligado, removido ou falha ao subir.
+- Escolher "Não gerenciado" restaura os valores anteriores de `QUEUE_CONNECTION` e `REDIS_*`.
+- Domínios extras recusam os nomes reservados (`db`, `mail`, `s3`).
+- `php.ini` sem avisos de recursos obsoletos e com `pgsql` ligado por padrão.
+
 ## v0.1.1
 
 Versão de manutenção do instalador.

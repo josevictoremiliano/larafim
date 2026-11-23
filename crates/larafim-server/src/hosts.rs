@@ -112,8 +112,9 @@ pub fn is_up_to_date(wanted: &BTreeSet<String>) -> bool {
 }
 
 /// Pede ao Windows (UAC) para rodar o ajudante e gravar o bloco.
-/// `work_dir` é onde fica o arquivo com a lista pedida.
-pub fn request_update(wanted: &BTreeSet<String>, work_dir: &Path) -> Result<(), HostsError> {
+/// `work_dir` é onde fica o arquivo com a lista pedida; `exe` é o Larafim a
+/// rodar elevado (no pacote MSIX, o alias — o caminho do pacote não serve).
+pub fn request_update(wanted: &BTreeSet<String>, work_dir: &Path, exe: &Path) -> Result<(), HostsError> {
     if wanted.iter().any(|h| !valid_host(h)) || wanted.len() > MAX_ENTRIES {
         return Err(HostsError::Failed(t!("lista de domínios inválida")));
     }
@@ -121,7 +122,6 @@ pub fn request_update(wanted: &BTreeSet<String>, work_dir: &Path) -> Result<(), 
     let list: Vec<&str> = wanted.iter().map(String::as_str).collect();
     std::fs::write(&request, list.join("\n")).map_err(|e| HostsError::Failed(e.to_string()))?;
 
-    let exe = std::env::current_exe().map_err(|e| HostsError::Failed(e.to_string()))?;
     let status = runas::Command::new(exe)
         .arg(HELPER_FLAG)
         .arg(&request)

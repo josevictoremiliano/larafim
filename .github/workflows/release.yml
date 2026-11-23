@@ -74,6 +74,19 @@ jobs:
         working-directory: app
         run: npx tauri build
 
+      # Pacote da Microsoft Store, sem assinatura (a Store assina). Não vai
+      # para a release: sem assinatura ele não instala fora da Store. Baixe
+      # em Actions › esta execução › Artifacts e envie pelo Partner Center.
+      - name: Pacote MSIX (Microsoft Store)
+        shell: pwsh
+        run: ./scripts/msix.ps1
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: larafim-msix-${{ env.TAG }}
+          path: target/msix/*.msix
+          if-no-files-found: error
+
       - name: SHA-256 do instalador
         id: files
         shell: pwsh

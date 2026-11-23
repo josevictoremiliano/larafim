@@ -14,6 +14,7 @@ mod secret;
 mod autostart;
 mod https;
 mod language;
+mod packaged;
 mod pg;
 mod redis;
 mod s3;

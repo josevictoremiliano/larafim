@@ -12,7 +12,7 @@ fn wide(s: &str) -> Vec<u16> {
 
 /// Linha de comando gravada no registro.
 fn command_line() -> Result<String, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = crate::packaged::launch_exe().map_err(|e| e.to_string())?;
     Ok(format!("\"{}\" {TRAY_ARG}", exe.display()))
 }
 

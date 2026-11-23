@@ -220,7 +220,8 @@ pub async fn ensure_hosts(app: &AppHandle) -> Result<(), ServerError> {
         return Ok(());
     }
     let dir = app.state::<AppState>().paths.root().to_path_buf();
-    let result = tauri::async_runtime::spawn_blocking(move || hosts::request_update(&wanted, &dir))
+    let exe = crate::packaged::launch_exe().map_err(|e| ServerError::new("error", e.to_string()))?;
+    let result = tauri::async_runtime::spawn_blocking(move || hosts::request_update(&wanted, &dir, &exe))
         .await
         .map_err(|e| ServerError::new("error", e.to_string()))?;
     match result {
