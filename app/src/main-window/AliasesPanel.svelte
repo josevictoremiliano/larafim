@@ -11,9 +11,12 @@
   let {
     project,
     onchange,
+    showTitle = true,
   }: {
     project: Project;
     onchange: (data: ProjectsOverview) => void;
+    /** Dentro de uma seção recolhível o título já aparece no cabeçalho dela. */
+    showTitle?: boolean;
   } = $props();
 
   const tld = $derived(app.config?.tld ?? "local");
@@ -107,7 +110,7 @@
 </script>
 
 <div class="head">
-  <div class="section-title">{t("Domínios extras")}</div>
+  {#if showTitle}<div class="section-title">{t("Domínios extras")}</div>{:else}<span></span>{/if}
   {#if !adding}
     <button class="btn subtle icon" title={t("Adicionar domínio")} disabled={busy} onclick={openEditor}>
       <Glyph name="add" />

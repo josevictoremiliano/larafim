@@ -194,6 +194,7 @@ pub fn run() {
             redis::project_install_predis,
             tools::xdebug_info,
             tools::xdebug_set,
+            tools::project_run,
             tools::laravel_templates,
             tools::laravel_create,
             services::suggest_own_port,

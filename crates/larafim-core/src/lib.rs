@@ -1,5 +1,6 @@
 //! Núcleo do Larafim: onde ficam os dados, configuração do app e logs.
 
+pub mod artisan;
 pub mod config;
 pub mod composer;
 pub mod envfile;

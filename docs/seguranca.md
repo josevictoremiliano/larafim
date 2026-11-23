@@ -166,6 +166,11 @@ Código: [`app_update.rs`](../crates/larafim-runtimes/src/app_update.rs),
   RustFS e o `composer create-project`. Fora o comando do Node, que é do próprio projeto, todos são
   textos fixos montados pelo Larafim, com caminhos entre aspas. O nome do projeto no
   `create-project` só aceita letras, números, `-` e `_`.
+- As **ações rápidas** do painel ([`artisan.rs`](../crates/larafim-core/src/artisan.rs)) rodam o
+  `php.exe` direto, com cada argumento separado (sem shell): `&`, `|` e `%VAR%` digitados viram texto
+  de um argumento. O nome do comando do artisan não pode começar com `-`, quebras de linha e
+  caracteres de controle são recusados, e o Composer só aceita uma lista fechada (`install`,
+  `dump-autoload`).
 
 ## Testes
 
@@ -179,6 +184,7 @@ Código: [`app_update.rs`](../crates/larafim-runtimes/src/app_update.rs),
 | Só fontes oficiais | `download::tests::only_official_sources`, `refuses_before_connecting` |
 | Zips maliciosos | `archive::tests::refuses_path_traversal`, `refuses_symlinks`, `refuses_zip_bomb`, `refuses_too_many_entries`, `refuses_garbage` |
 | Catálogos adulterados | `mariadb::tests::tampered_catalog_is_ignored`, `php::catalog::tests::picks_nts_x64_sorted_and_rejects_unsafe_paths`, `postgres::tests::skips_without_digest`, `redis::tests::tampered_release_is_refused` |
+| Ações rápidas (artisan/composer) | `artisan::tests::hostile_commands_are_refused_or_stay_literal`, `composer_is_a_closed_list` |
 | Filas e WSL na linha de comando | `safety::tests::queue_names`, `wsl_distros`, `queues::tests::hostile_names_never_become_arguments`, `redis::tests::hostile_wsl_names_are_dropped`, `config::tests::redis_config_is_validated` |
 | Caminhos no servidor local | `resolve::tests::protections`, `windows_name_tricks` |
 | XSS nas páginas do gateway | `pages::tests::request_data_is_escaped` |

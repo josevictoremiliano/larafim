@@ -403,6 +403,122 @@ pub(crate) fn run_install(
     (ok, text)
 }
 
+// ================= Ações rápidas (artisan/composer) =================
+
+#[derive(Serialize)]
+pub struct RunResult {
+    ok: bool,
+    output: String,
+    millis: u64,
+}
+
+/// Roda um programa sem janela, juntando stdout e stderr (até 256 KB cada) e
+/// matando o processo se passar de `timeout`. Devolve (ok, saída sem ANSI).
+fn run_captured(exe: &Path, args: &[String], cwd: &Path, env: &[(&str, String)], timeout: std::time::Duration) -> (bool, String) {
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(exe);
+    cmd.args(args).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return (false, e.to_string()),
+    };
+    let read = |r: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(r) = r {
+                let _ = r.take(256 * 1024).read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let out = read(child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+    let err = read(child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+    let started = std::time::Instant::now();
+    let (ok, timed_out) = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break (s.success(), false),
+            Ok(None) if started.elapsed() > timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break (false, true);
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(_) => break (false, false),
+        }
+    };
+    let mut bytes = out.join().unwrap_or_default();
+    bytes.extend(err.join().unwrap_or_default());
+    let mut text: String = String::from_utf8_lossy(&bytes)
+        .lines()
+        .map(larafim_server::devserver::strip_ansi)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if timed_out {
+        text.push_str(&format!("\n{}", t!("passou de {a} minutos e foi interrompido", a = timeout.as_secs() / 60)));
+    }
+    (ok, text.trim().to_string())
+}
+
+/// Ação rápida do painel: `php artisan …` (botão ou texto digitado) ou uma
+/// ação fechada do Composer, com o PHP do projeto, sem shell e com tempo limite.
+#[tauri::command]
+pub async fn project_run(app: AppHandle, path: PathBuf, tool: String, command: String) -> CmdResult<RunResult> {
+    let view = view_of(&app, &path)?;
+    let paths = app.state::<AppState>().paths.clone();
+    let installed = rphp::list_installed(&paths.php_dir());
+    let php = crate::server::php_for(&view, &installed).0.ok_or_else(|| t!("nenhum PHP instalado atende a este projeto"))?;
+    let flags = ["--no-interaction".to_string(), "--no-ansi".to_string()];
+    let args: Vec<String> = match tool.as_str() {
+        "artisan" => {
+            if !view.path.join("artisan").is_file() {
+                return Err(t!("o projeto não tem o arquivo artisan"));
+            }
+            let a = larafim_core::artisan::artisan_args(&command)?;
+            // Migrações e seeds precisam do banco do projeto ligado.
+            if a[0].starts_with("migrate") || a[0].starts_with("db:") {
+                crate::server::start_project_db(&app, &view).await?;
+            }
+            std::iter::once("artisan".to_string()).chain(a).chain(flags).collect()
+        }
+        "composer" => {
+            let composer = larafim_runtimes::extras::composer_path(&paths);
+            if !composer.is_file() {
+                return Err(t!("o Composer ainda não foi baixado (instale um PHP pelo Larafim)"));
+            }
+            if !view.path.join("composer.json").is_file() {
+                return Err(t!("o projeto não tem composer.json"));
+            }
+            let a = larafim_core::artisan::composer_args(&command).ok_or_else(|| t!("ação do Composer desconhecida"))?;
+            std::iter::once(composer.display().to_string()).chain(a).chain(flags).collect()
+        }
+        _ => return Err(t!("ferramenta desconhecida")),
+    };
+    let exe = php.dir.join("php.exe");
+    // Scripts do Composer chamam `php`: o do projeto vem primeiro no PATH.
+    let env = [
+        ("PATH", format!("{};{}", php.dir.display(), std::env::var("PATH").unwrap_or_default())),
+        ("COMPOSER_NO_INTERACTION", "1".to_string()),
+    ];
+    let dir = view.path.clone();
+    let started = std::time::Instant::now();
+    let (ok, output) = tauri::async_runtime::spawn_blocking(move || {
+        let env: Vec<(&str, String)> = env.iter().map(|(k, v)| (*k, v.clone())).collect();
+        run_captured(&exe, &args, &dir, &env, std::time::Duration::from_secs(600))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    tracing::info!(path = %path.display(), tool, command, ok, "ação rápida");
+    Ok(RunResult { ok, output, millis: started.elapsed().as_millis() as u64 })
+}
+
 // ================= Workers do Laravel =================
 
 pub fn worker_key(path: &Path, worker: &str) -> String {

@@ -10,7 +10,7 @@
   import { toolsApi, workerKey, type Worker } from "../lib/tools";
 
   // Workers do Laravel: ligam junto com o projeto e reiniciam se caírem.
-  let { project }: { project: Project } = $props();
+  let { project, showTitle = true }: { project: Project; showTitle?: boolean } = $props();
 
   const labels = $derived<Record<Worker, { title: string; hint: string }>>({
     queue: {
@@ -166,7 +166,7 @@
   };
 </script>
 
-<div class="section-title">{t("Workers")}</div>
+{#if showTitle}<div class="section-title">{t("Workers")}</div>{/if}
 {#each workers as w (w)}
   {@const running = status[w]?.state === "running" || status[w]?.state === "starting"}
   <div class="worker">

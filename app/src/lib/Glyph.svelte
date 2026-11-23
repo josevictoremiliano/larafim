@@ -37,6 +37,8 @@
     power: "",
     apps: "",
     stop: "",
+    flash: "",
+    layers: "",
   } as const;
 
   export type GlyphName = keyof typeof glyphs;

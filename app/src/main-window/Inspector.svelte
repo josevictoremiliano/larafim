@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from "../lib/i18n.svelte";
+  import { plural, t } from "../lib/i18n.svelte";
   import { api, kindLabel, projectUrl } from "../lib/api";
   import Glyph from "../lib/Glyph.svelte";
   import { confirm, php, type PhpMatch } from "../lib/php";
@@ -10,6 +10,8 @@
   import DbPanel from "./DbPanel.svelte";
   import WorkersPanel from "./WorkersPanel.svelte";
   import AliasesPanel from "./AliasesPanel.svelte";
+  import Collapsible from "./Collapsible.svelte";
+  import QuickActions from "./QuickActions.svelte";
   import { toolsApi } from "../lib/tools";
   import { s3 } from "../lib/s3";
   import { redis } from "../lib/redis";
@@ -284,6 +286,33 @@
     setTimeout(() => (copied = false), 1500);
   }
 
+  // Resumos das seções recolhidas.
+  const envSummary = $derived.by(() => {
+    if (!project) return "";
+    const parts: string[] = [];
+    if (project.kind !== "node" && match?.installed) parts.push(`PHP ${match.installed}`);
+    const node = project.node_pin ?? project.node_request;
+    if (project.has_node && node) parts.push(`Node ${node}`);
+    return parts.join(" · ");
+  });
+  const servicesSummary = $derived.by(() => {
+    if (!project) return "";
+    const db: Record<string, string> = { mariadb: "MariaDB", "mariadb-own": "MariaDB", postgres: "PostgreSQL" };
+    const parts = [
+      project.database ? (db[project.database] ?? t("Banco existente")) : null,
+      project.mail === "mailpit" ? "Mailpit" : null,
+      project.storage === "s3" ? "S3" : null,
+      project.queue_connection === "redis" ? "Redis" : null,
+    ].filter(Boolean);
+    return parts.length ? parts.join(" · ") : t("Nenhum gerenciado");
+  });
+  const workersSummary = $derived(
+    project?.workers.length ? plural(project.workers.length, "{n} ligado", "{n} ligados") : t("Desligados"),
+  );
+  const aliasesSummary = $derived(
+    project?.aliases.length ? plural(project.aliases.length, "{n} domínio", "{n} domínios") : "",
+  );
+
   const docrootLabel = (d: string) => (d ? `${d}\\` : t("Raiz do projeto"));
   const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 </script>
@@ -356,6 +385,14 @@
             {/if}
           </span>
         </div>
+        <button
+          class="btn subtle icon"
+          title={project.online ? t("Abrir no navegador") : t("Ligue o projeto para abrir")}
+          disabled={!project.online}
+          onclick={() => server.openUrl(url)}
+        >
+          <Glyph name="openExternal" />
+        </button>
         <Toggle
           label={t("Projeto online")}
           checked={project.online}
@@ -394,16 +431,20 @@
           </div>
         </div>
       {/if}
+    {/if}
 
-      <button class="btn wide" disabled={!project.online} onclick={() => server.openUrl(url)}>
-        <Glyph name="globe" />
-        {t("Abrir no navegador")}
-      </button>
+    {#if imported && project.kind !== "node"}
+      <div class="section">
+        <div class="section-title">
+          <Glyph name="flash" size={14} />
+          {project.kind === "laravel" ? t("Ações rápidas do Laravel") : t("Ações rápidas")}
+        </div>
+        <QuickActions {project} />
+      </div>
     {/if}
 
     {#if project.status !== "missing"}
-      <div class="section">
-        <div class="section-title">{t("Ambiente")}</div>
+      <Collapsible id="env" icon="settings" title={t("Ambiente")} summary={envSummary} open={!imported}>
 
         <div class="field">
           <span>{t("Tipo")}</span>
@@ -529,18 +570,17 @@
             <DevPanel path={project.path} online={project.online} />
           {/if}
         {/if}
-      </div>
+      </Collapsible>
     {/if}
 
     {#if imported}
-      <div class="section">
-        <AliasesPanel {project} {onchange} />
-      </div>
+      <Collapsible id="aliases" icon="globe" title={t("Domínios extras")} summary={aliasesSummary}>
+        <AliasesPanel {project} {onchange} showTitle={false} />
+      </Collapsible>
     {/if}
 
     {#if imported && project.kind !== "node"}
-      <div class="section">
-        <div class="section-title">{t("Serviços")}</div>
+      <Collapsible id="services" icon="server" title={t("Serviços")} summary={servicesSummary}>
         <DbPanel {project} />
         <div class="field">
           <span>{t("E-mail")}</span>
@@ -588,13 +628,13 @@
           </div>
           {#if installingPredis}<InstallProgress path={project.path} label={t("Instalando predis/predis…")} />{/if}
         {/if}
-      </div>
+      </Collapsible>
     {/if}
 
     {#if imported && project.kind === "laravel"}
-      <div class="section">
-        <WorkersPanel {project} />
-      </div>
+      <Collapsible id="workers" icon="apps" title={t("Workers")} summary={workersSummary}>
+        <WorkersPanel {project} showTitle={false} />
+      </Collapsible>
     {/if}
 
     {#if imported}
@@ -750,6 +790,9 @@
     padding-top: 4px;
   }
   .section-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     margin-bottom: 2px;
   }
   .field {

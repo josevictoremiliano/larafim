@@ -64,6 +64,13 @@ export interface ReverbPreview {
   no_env: boolean;
 }
 
+/** Resultado de uma ação rápida (`php artisan …`, `composer …`). */
+export interface RunResult {
+  ok: boolean;
+  output: string;
+  millis: number;
+}
+
 export interface NewLaravel {
   name: string;
   root: string;
@@ -157,6 +164,17 @@ const mock = {
     launch_json: '{\n  "name": "Larafim: ouvir Xdebug",\n  "type": "php",\n  "request": "launch",\n  "port": 9003\n}',
   }),
   xdebugSet: async (v: string, enabled: boolean) => ((xdebugOn = enabled), mock.xdebugInfo(v)),
+  projectRun: async (_path: string, tool: "artisan" | "composer", command: string): Promise<RunResult> => {
+    await new Promise((r) => setTimeout(r, 700));
+    if (command.startsWith("serve")) throw "o serve fica rodando: use o terminal do projeto ou os workers";
+    const out: Record<string, string> = {
+      migrate: "INFO  Running migrations.\n\n  2026_11_23_000000_create_posts_table .... 12.4ms DONE",
+      "migrate --seed": "INFO  Nothing to migrate.\n\nINFO  Seeding database.",
+      "cache:clear": "INFO  Application cache cleared successfully.",
+      "optimize:clear": "INFO  Clearing cached bootstrap files.\n\n  config ......... 2.1ms DONE\n  cache .......... 4.0ms DONE\n  routes ......... 0.9ms DONE",
+    };
+    return { ok: true, output: out[command] ?? `${tool} ${command}: ok`, millis: 700 };
+  },
   laravelTemplates: async (): Promise<LaravelTemplate[]> => {
     const tpl = (id: string, laravel: string, kit: Kit, label: string, version: string, php_min: string, preview = false) => ({
       id, laravel, kit, label, package: `laravel/${kit === "none" ? "laravel" : `${kit}-starter-kit`}:${version}`, php_min, php_max: "8.5", preview,
@@ -204,6 +222,8 @@ export const toolsApi = inTauri
       queuesSet: (path: string, text: string) => invoke<string[]>("queues_set", { path, text }),
       xdebugInfo: (version: string) => invoke<XdebugInfo>("xdebug_info", { version }),
       xdebugSet: (version: string, enabled: boolean) => invoke<XdebugInfo>("xdebug_set", { version, enabled }),
+      projectRun: (path: string, tool: "artisan" | "composer", command: string) =>
+        invoke<RunResult>("project_run", { path, tool, command }),
       laravelTemplates: () => invoke<LaravelTemplate[]>("laravel_templates"),
       laravelCreate: (input: NewLaravel) => invoke<string>("laravel_create", { input }),
     }

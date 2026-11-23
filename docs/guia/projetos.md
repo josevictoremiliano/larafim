@@ -26,7 +26,11 @@ Ele **nunca cria nem altera** esses arquivos.
 
 ## Configuração de cada projeto
 
-No painel à direita da janela principal:
+No painel à direita da janela principal. No topo ficam o interruptor **Online** (com o botão de abrir
+no navegador) e as **ações rápidas**; o resto fica em seções que abrem e fecham (**Ambiente**,
+**Domínios extras**, **Serviços** e **Workers**). Fechada, cada seção mostra um resumo (versão do
+PHP, serviços em uso, workers ligados), e o Larafim lembra quais você deixou abertas.
+
 
 - **Domínio:** o endereço `<domínio>.offline`. Só aceita letras minúsculas, números e hífen.
 - **Domínios extras:** apontam para o mesmo projeto. `db`, `mail`, `s3` e seus subdomínios são
@@ -40,6 +44,21 @@ No painel à direita da janela principal:
 
 A configuração fica em `%LOCALAPPDATA%\Larafim\projects.toml`, **fora do repositório do projeto**:
 nada do Larafim aparece no seu Git.
+
+### Ações rápidas
+
+Um clique roda o comando no projeto, com o PHP dele, sem abrir o terminal:
+
+- **Laravel:** **Migrar** (`migrate`), **Migrar com seed** (`migrate --seed`), **Limpar cache**
+  (`cache:clear`) e **Limpar otimizações** (`optimize:clear`). As migrações ligam antes o banco do
+  projeto, se for um banco do Larafim.
+- **`php artisan`:** campo para qualquer outro comando (`route:list`, `make:model Post -m`…). Enter
+  executa. Comandos que ficam rodando (`serve`, `tinker`, `queue:work`, `reverb:start`…) são recusados:
+  use o terminal do projeto ou os workers.
+- **Composer:** `composer install` e `composer dump-autoload` (também em projetos PHP sem Laravel).
+
+O resultado aparece logo abaixo, com o tempo e a saída do comando (que abre sozinha se der erro).
+Cada comando tem até 10 minutos para terminar.
 
 ## Online e offline
 
