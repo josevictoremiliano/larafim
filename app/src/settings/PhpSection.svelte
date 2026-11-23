@@ -96,6 +96,15 @@
     xdebugError = null;
     extensions = await php.extensions(version);
     xdebug = await toolsApi.xdebugInfo(version).catch(() => null);
+    deprecations = await php.deprecations(version).catch(() => null);
+  }
+
+  // Avisos de obsolescência (E_DEPRECATED): só muda quando a pessoa pede.
+  let deprecations = $state<boolean | null>(null);
+  async function setDeprecations(show: boolean) {
+    if (!detail) return;
+    deprecations = await php.setDeprecations(detail, show);
+    extSaved = true;
   }
 
   async function setXdebug(enabled: boolean) {
@@ -166,6 +175,23 @@
     {/if}
     {#if xdebugError}<p class="caption xd-err">{xdebugError}</p>{/if}
   </div>
+
+  {#if deprecations !== null}
+    <div class="xdebug card">
+      <div class="xd-head">
+        <Glyph name="info" size={18} />
+        <div class="xd-text">
+          <strong>{t("Avisos de obsolescência")}</strong>
+          <span class="caption">
+            {deprecations
+              ? t("Aparecem na página (E_DEPRECATED). Útil para preparar o código para o próximo PHP.")
+              : t("Escondidos da página; o Laravel continua registrando no log dele.")}
+          </span>
+        </div>
+        <Toggle label={t("Avisos de obsolescência")} checked={deprecations} onchange={setDeprecations} />
+      </div>
+    </div>
+  {/if}
 
   {#if extSaved}
     <div class="infobar">

@@ -165,8 +165,8 @@
   "Instalar PHP {v}": "Install PHP {v}",
   "Instalar {v}": "Install {v}",
   "Instale ao menos uma versão do MariaDB em Configurações › Serviços.": "Install at least one MariaDB version in Settings › Services.",
-  "O Laravel 13 precisa do PHP 8.3, 8.4 ou 8.5: instale em Configurações › PHP.": "Laravel 13 needs PHP 8.3, 8.4 or 8.5: install it in Settings › PHP.",
-  "o Laravel 13 precisa do PHP 8.3, 8.4 ou 8.5": "Laravel 13 needs PHP 8.3, 8.4 or 8.5",
+  "Instale o PHP 8.2 ou mais novo em Configurações › PHP.": "Install PHP 8.2 or newer in Settings › PHP.",
+  "o Laravel {v} precisa do PHP {a} a {b}": "Laravel {v} needs PHP {a} to {b}",
   "Instale o PostgreSQL em Configurações › Serviços.": "Install PostgreSQL in Settings › Services.",
   "Instale o storage S3 em Configurações › Serviços.": "Install the S3 storage in Settings › Services.",
   "Ligado · porta 9003 · ativa quando a IDE pede (trigger)": "On · port 9003 · activates when the IDE asks (trigger)",
@@ -193,7 +193,8 @@
   "MySQL do Laragon": "Laragon's MySQL",
   "Método não permitido": "Method not allowed",
   "Nada encontrado nesta pasta.": "Nothing found in this folder.",
-  "Nenhum (só Laravel)": "None (Laravel only)",
+  "Só o Laravel": "Laravel only",
+  "O starter kit do Laravel 13 ainda não tem versão publicada e vem do branch em desenvolvimento.": "The Laravel 13 starter kit has no published release yet and comes from the development branch.",
   "Nenhum PHP instalado atende a este projeto.": "No installed PHP version satisfies this project.",
   "Nenhum PHP serve": "No PHP fits",
   "Nenhum arquivo .log em storage\\logs (ou logs) deste projeto.": "No .log files in this project's storage\\logs (or logs).",
@@ -759,5 +760,8 @@
   "domínio extra \"{a}\" inválido: use letras minúsculas, números, hífen e ponto": "invalid extra domain \"{a}\": use lowercase letters, numbers, hyphens and dots",
   "domínio extra \"{a}\" reservado para um serviço do Larafim": "extra domain \"{a}\" is reserved for a Larafim service",
   "Atualizado pela Microsoft Store": "Updated by the Microsoft Store",
-  "A Store instala as versões novas do Larafim automaticamente.": "The Store installs new versions of Larafim automatically."
+  "A Store instala as versões novas do Larafim automaticamente.": "The Store installs new versions of Larafim automatically.",
+  "Avisos de obsolescência": "Deprecation warnings",
+  "Aparecem na página (E_DEPRECATED). Útil para preparar o código para o próximo PHP.": "Shown on the page (E_DEPRECATED). Useful to get code ready for the next PHP.",
+  "Escondidos da página; o Laravel continua registrando no log dele.": "Hidden from the page; Laravel still writes them to its log."
 }

@@ -81,8 +81,18 @@ Larafim, o worker usa `queue:work redis --queue=<lista>`, que processa as mesmas
 ## Novo projeto Laravel
 
 **Novo Laravel** (na janela principal ou na bandeja) cria um projeto com `composer create-project`:
-nome, pasta, versão do PHP, starter kit (nenhum, React, Vue, Livewire) e banco. A saída aparece ao
-vivo; no fim, o projeto já entra na lista com o `.env` configurado.
+nome, pasta, versão do PHP, starter kit e banco. A saída aparece ao vivo; no fim, o projeto já entra
+na lista com o `.env` configurado.
+
+Os starter kits ficam agrupados pela versão do Laravel, todos com versão fixa:
+
+| Grupo | Só o Laravel | React, Vue, Livewire | PHP |
+|---|---|---|---|
+| **Laravel 13** | `laravel/laravel:^13.0` | branch `dev-main` (ainda não há versão publicada; o Larafim avisa ao escolher) | 8.3 a 8.5 |
+| **Laravel 12** | `laravel/laravel:^12.0` | versões publicadas `^1.0` (React 19, Vue 3.5, Livewire 3) | 8.2 a 8.5 |
+
+Os modelos que não servem para o PHP escolhido ficam desabilitados. Os kits do Laravel 13 podem mudar de um projeto
+para outro; para um projeto estável com starter kit, use o grupo do Laravel 12.
 
 O nome só aceita letras, números, `-` e `_`.
 

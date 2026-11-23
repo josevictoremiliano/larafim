@@ -33,6 +33,29 @@ export interface XdebugInfo {
 export type Worker = "queue" | "schedule" | "reverb";
 export type Kit = "none" | "react" | "vue" | "livewire";
 
+/** Modelo do "Novo Laravel" (a lista vem do Rust). */
+export interface LaravelTemplate {
+  id: string;
+  laravel: string;
+  kit: Kit;
+  /** "React 19"; vazio no "só Laravel". */
+  label: string;
+  package: string;
+  php_min: string;
+  php_max: string;
+  /** Starter kit de um branch em desenvolvimento (dev-main). */
+  preview: boolean;
+}
+
+/** "8.3" → 803, para comparar minors. */
+export const minorNum = (v: string) => {
+  const [a, b] = v.split(".").map(Number);
+  return Number.isInteger(a) && Number.isInteger(b) ? a * 100 + b : NaN;
+};
+
+export const templateAccepts = (t: LaravelTemplate, php: string) =>
+  minorNum(t.php_min) <= minorNum(php) && minorNum(php) <= minorNum(t.php_max);
+
 export interface ReverbPreview {
   installed: boolean;
   port: number;
@@ -45,7 +68,8 @@ export interface NewLaravel {
   name: string;
   root: string;
   php: string;
-  kit: Kit;
+  /** Id de um `LaravelTemplate`. */
+  template: string;
   database: "sqlite" | "mariadb";
 }
 
@@ -133,6 +157,21 @@ const mock = {
     launch_json: '{\n  "name": "Larafim: ouvir Xdebug",\n  "type": "php",\n  "request": "launch",\n  "port": 9003\n}',
   }),
   xdebugSet: async (v: string, enabled: boolean) => ((xdebugOn = enabled), mock.xdebugInfo(v)),
+  laravelTemplates: async (): Promise<LaravelTemplate[]> => {
+    const tpl = (id: string, laravel: string, kit: Kit, label: string, version: string, php_min: string, preview = false) => ({
+      id, laravel, kit, label, package: `laravel/${kit === "none" ? "laravel" : `${kit}-starter-kit`}:${version}`, php_min, php_max: "8.5", preview,
+    });
+    return [
+      tpl("13", "13", "none", "", "^13.0", "8.3"),
+      tpl("13-react", "13", "react", "React 19", "dev-main", "8.3", true),
+      tpl("13-vue", "13", "vue", "Vue 3.5", "dev-main", "8.3", true),
+      tpl("13-livewire", "13", "livewire", "Livewire 4", "dev-main", "8.3", true),
+      tpl("12", "12", "none", "", "^12.0", "8.2"),
+      tpl("12-react", "12", "react", "React 19", "^1.0", "8.2"),
+      tpl("12-vue", "12", "vue", "Vue 3.5", "^1.0", "8.2"),
+      tpl("12-livewire", "12", "livewire", "Livewire 3", "^1.0", "8.2"),
+    ];
+  },
   laravelCreate: async (input: NewLaravel) => {
     const key = `create:d:\\www\\${input.name}`;
     const lines = ["Creating a \"laravel/laravel\" project at \"./" + input.name + "\"", "Installing dependencies", "  - Installing laravel/framework (v12.40.1)", "Application key set successfully."];
@@ -165,6 +204,7 @@ export const toolsApi = inTauri
       queuesSet: (path: string, text: string) => invoke<string[]>("queues_set", { path, text }),
       xdebugInfo: (version: string) => invoke<XdebugInfo>("xdebug_info", { version }),
       xdebugSet: (version: string, enabled: boolean) => invoke<XdebugInfo>("xdebug_set", { version, enabled }),
+      laravelTemplates: () => invoke<LaravelTemplate[]>("laravel_templates"),
       laravelCreate: (input: NewLaravel) => invoke<string>("laravel_create", { input }),
     }
   : mock;

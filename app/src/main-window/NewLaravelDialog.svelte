@@ -6,8 +6,7 @@
   import type { DevLog, DevStatus } from "../lib/node";
   import { php } from "../lib/php";
   import { app } from "../lib/state.svelte";
-  const LARAVEL_PHP = ["8.3", "8.4", "8.5"];
-  import { toolsApi, type Created, type Kit } from "../lib/tools";
+  import { minorNum, templateAccepts, toolsApi, type Created, type LaravelTemplate } from "../lib/tools";
 
   // Assistente: criar um projeto Laravel novo já cadastrado no Larafim.
   let { onclose, ondone }: { onclose: () => void; ondone: (path: string) => void } = $props();
@@ -16,9 +15,22 @@
   // svelte-ignore state_referenced_locally
   let root = $state(app.config?.roots[0] ?? "");
   let phpMinor = $state("");
-  let kit = $state<Kit>("none");
+  let templateId = $state("");
   let database = $state<"sqlite" | "mariadb">("sqlite");
   let minors = $state<string[]>([]);
+  let templates = $state<LaravelTemplate[]>([]);
+
+  // Grupos do seletor, na ordem da lista do Rust (Laravel mais novo primeiro).
+  const groups = $derived([...new Set(templates.map((t) => t.laravel))].map((v) => ({ v, items: templates.filter((t) => t.laravel === v) })));
+  const template = $derived(templates.find((t) => t.id === templateId) ?? null);
+
+  // Trocou o PHP e o modelo não serve mais: passa para o primeiro que serve.
+  $effect(() => {
+    if (!phpMinor || !templates.length || (template && templateAccepts(template, phpMinor))) return;
+    templateId = templates.find((t) => templateAccepts(t, phpMinor))?.id ?? "";
+  });
+
+  const kitName = (tpl: LaravelTemplate) => (tpl.kit === "none" ? t("Só o Laravel") : tpl.label);
 
   let key = $state<string | null>(null);
   let output = $state<string[]>([]);
@@ -27,10 +39,11 @@
   let box = $state<HTMLPreElement>();
 
   $effect(() => {
-    php.overview().then((o) => {
-      // Só os PHPs que o Laravel 13 suporta; o mais novo deles vem selecionado.
-      minors = o.rows.filter((r) => r.installed && LARAVEL_PHP.includes(r.minor)).map((r) => r.minor);
-      minors.sort((a, b) => Number(b) - Number(a));
+    Promise.all([php.overview(), toolsApi.laravelTemplates()]).then(([o, list]) => {
+      templates = list;
+      // Só os PHPs que algum modelo aceita; o mais novo vem selecionado.
+      minors = o.rows.filter((r) => r.installed && list.some((t) => templateAccepts(t, r.minor))).map((r) => r.minor);
+      minors.sort((a, b) => minorNum(b) - minorNum(a));
       phpMinor = minors[0] ?? "";
     });
     const stops = [
@@ -63,7 +76,7 @@
     error = null;
     output = [];
     try {
-      key = await toolsApi.laravelCreate({ name: slug, root, php: phpMinor, kit, database });
+      key = await toolsApi.laravelCreate({ name: slug, root, php: phpMinor, template: templateId, database });
     } catch (e) {
       error = String(e);
     }
@@ -103,19 +116,32 @@
             </select>
           </div>
         </div>
-        {#if !minors.length}<p class="caption warn">{t("O Laravel 13 precisa do PHP 8.3, 8.4 ou 8.5: instale em Configurações › PHP.")}</p>{/if}
+        {#if templates.length && !minors.length}
+          <p class="caption warn">{t("Instale o PHP 8.2 ou mais novo em Configurações › PHP.")}</p>
+        {/if}
         <div class="row">
           <span>{t("Starter kit")}</span>
           <div class="select">
-            <select bind:value={kit}>
-              <option value="none">{t("Nenhum (só Laravel)")}</option>
-              <option value="react">React</option>
-              <option value="vue">Vue</option>
-              <option value="livewire">Livewire</option>
+            <select bind:value={templateId}>
+              {#each groups as g (g.v)}
+                <optgroup label={`Laravel ${g.v}`}>
+                  {#each g.items as tpl (tpl.id)}
+                    <option value={tpl.id} disabled={!!phpMinor && !templateAccepts(tpl, phpMinor)}>
+                      {kitName(tpl)}
+                    </option>
+                  {/each}
+                </optgroup>
+              {/each}
             </select>
           </div>
         </div>
-        {#if kit !== "none"}<p class="caption preview">{t("Inclui npm install e build (precisa do Node.js do Larafim).")}</p>{/if}
+        {#if template}
+          <p class="caption preview">Laravel {template.laravel} · <span class="mono">{template.package}</span></p>
+        {/if}
+        {#if template?.preview}
+          <p class="caption preview warn">{t("O starter kit do Laravel 13 ainda não tem versão publicada e vem do branch em desenvolvimento.")}</p>
+        {/if}
+        {#if template && template.kit !== "none"}<p class="caption preview">{t("Inclui npm install e build (precisa do Node.js do Larafim).")}</p>{/if}
         <div class="row">
           <span>{t("Banco de dados")}</span>
           <div class="select">
@@ -141,7 +167,7 @@
     </div>
     <div class="footer">
       {#if key === null}
-        <button class="btn accent" disabled={!slug || !root || !phpMinor} onclick={create}>{t("Criar")}</button>
+        <button class="btn accent" disabled={!slug || !root || !phpMinor || !template} onclick={create}>{t("Criar")}</button>
         <button class="btn" onclick={onclose}>{t("Cancelar")}</button>
       {:else if result?.ok}
         <button class="btn accent" onclick={() => ondone(result!.path)}>{t("Abrir projeto")}</button>

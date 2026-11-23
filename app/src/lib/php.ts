@@ -101,6 +101,7 @@ const mockRows: PhpRow[] = [
 mockRows[2] = { ...mockRows[2], installed: "8.4.27", update_available: true };
 mockRows[3] = { ...mockRows[3], installed: "8.3.37" };
 
+let mockDeprecations = false;
 let mockExts: PhpExtension[] = ["bz2", "curl", "fileinfo", "gd", "gmp", "intl", "mbstring", "mysqli", "opcache", "openssl", "pdo_mysql", "pdo_pgsql", "pdo_sqlite", "sodium", "xsl", "zip"].map(
   (name) => ({ name, enabled: !["bz2", "gmp", "pdo_pgsql", "xsl"].includes(name), zend: name === "opcache" }),
 );
@@ -140,6 +141,8 @@ const mock = {
     mockExts = mockExts.map((e) => (e.name === name ? { ...e, enabled } : e));
     return mockExts.map((e) => ({ ...e }));
   },
+  deprecations: async (_version: string) => mockDeprecations,
+  setDeprecations: async (_version: string, show: boolean) => (mockDeprecations = show),
   openIni: async (_version: string) => {},
   openFolder: async (_version: string) => {},
   match: async (constraint: string | null, pinned: string | null = null): Promise<PhpMatch> => {
@@ -165,6 +168,8 @@ export const php = inTauri
       extensions: (version: string) => invoke<PhpExtension[]>("php_extensions", { version }),
       setExtension: (version: string, name: string, enabled: boolean) =>
         invoke<PhpExtension[]>("php_set_extension", { version, name, enabled }),
+      deprecations: (version: string) => invoke<boolean>("php_deprecations", { version }),
+      setDeprecations: (version: string, show: boolean) => invoke<boolean>("php_set_deprecations", { version, show }),
       openIni: (version: string) => invoke<void>("php_open_ini", { version }),
       openFolder: (version: string) => invoke<void>("php_open_folder", { version }),
       match: (constraint: string | null, pinned: string | null = null) =>

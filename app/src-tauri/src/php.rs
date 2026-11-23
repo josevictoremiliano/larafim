@@ -253,6 +253,28 @@ pub fn php_set_extension(
     Ok(ini::list_extensions(&updated, &ext_dir))
 }
 
+/// Os avisos de obsolescência (`E_DEPRECATED`) aparecem nessa versão?
+#[tauri::command]
+pub fn php_deprecations(state: State<'_, AppState>, version: String) -> CmdResult<bool> {
+    let p = find_installed(&state, &version)?;
+    let text = ini::read(&p.ini()).map_err(|e| e.to_string())?;
+    Ok(ini::deprecations_shown(&text))
+}
+
+/// Mostra ou esconde os avisos de obsolescência (só quando a pessoa pede:
+/// o Larafim não mexe sozinho no `php.ini` de uma versão já instalada).
+#[tauri::command]
+pub fn php_set_deprecations(state: State<'_, AppState>, version: String, show: bool) -> CmdResult<bool> {
+    let p = find_installed(&state, &version)?;
+    let text = ini::read(&p.ini()).map_err(|e| e.to_string())?;
+    let updated = ini::set_deprecations(&text, show);
+    if updated != text {
+        ini::write(&p.ini(), &updated).map_err(|e| e.to_string())?;
+        tracing::info!(version, show, "avisos de obsolescência alterados");
+    }
+    Ok(ini::deprecations_shown(&updated))
+}
+
 /// Abre o `php.ini` no editor padrão do Windows.
 #[tauri::command]
 pub fn php_open_ini(app: AppHandle, state: State<'_, AppState>, version: String) -> CmdResult<()> {

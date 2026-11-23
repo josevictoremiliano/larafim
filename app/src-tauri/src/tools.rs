@@ -927,26 +927,63 @@ pub struct NewLaravel {
     name: String,
     root: PathBuf,
     php: String,
-    /// "none", "react", "vue", "livewire"
-    kit: String,
+    /// Id de um item de `LARAVEL_TEMPLATES` ("13-react", "12"…).
+    template: String,
     /// "sqlite" ou "mariadb"
     database: String,
 }
 
-/// PHPs suportados pelo Laravel 13: fora disso o Composer cai para uma versão
-/// antiga do Laravel (ou o app quebra com avisos de obsolescência).
-pub const LARAVEL_PHP: [&str; 3] = ["8.3", "8.4", "8.5"];
+/// Um modelo do "Novo Laravel": versão do Laravel, starter kit e o pacote do
+/// `composer create-project`, sempre com versão fixa.
+#[derive(Serialize, Clone, Copy)]
+pub struct LaravelTemplate {
+    id: &'static str,
+    /// Grupo na interface ("13", "12").
+    laravel: &'static str,
+    /// "none", "react", "vue" ou "livewire".
+    kit: &'static str,
+    /// Nome com a versão do front ("React 19"); vazio no "só Laravel".
+    label: &'static str,
+    package: &'static str,
+    /// Faixa de PHP aceita (minors, inclusive).
+    php_min: &'static str,
+    php_max: &'static str,
+    /// Vem de um branch em desenvolvimento, não de um release.
+    preview: bool,
+}
 
-fn kit_package(kit: &str) -> Option<&'static str> {
-    match kit {
-        "none" => Some("laravel/laravel:^13.0"),
-        // Os releases marcados dos starter kits ainda são Laravel 12; o
-        // instalador oficial usa o dev-main, que já é Laravel 13.
-        "react" => Some("laravel/react-starter-kit:dev-main"),
-        "vue" => Some("laravel/vue-starter-kit:dev-main"),
-        "livewire" => Some("laravel/livewire-starter-kit:dev-main"),
-        _ => None,
+/// Lista única (a interface lê daqui). Os starter kits só têm releases
+/// marcados para o Laravel 12 (v1.0.x); os do Laravel 13 existem só no
+/// `dev-main`, então vão como prévia e o Laravel 12 continua como opção estável.
+pub const LARAVEL_TEMPLATES: &[LaravelTemplate] = &[
+    LaravelTemplate { id: "13", laravel: "13", kit: "none", label: "", package: "laravel/laravel:^13.0", php_min: "8.3", php_max: "8.5", preview: false },
+    LaravelTemplate { id: "13-react", laravel: "13", kit: "react", label: "React 19", package: "laravel/react-starter-kit:dev-main", php_min: "8.3", php_max: "8.5", preview: true },
+    LaravelTemplate { id: "13-vue", laravel: "13", kit: "vue", label: "Vue 3.5", package: "laravel/vue-starter-kit:dev-main", php_min: "8.3", php_max: "8.5", preview: true },
+    LaravelTemplate { id: "13-livewire", laravel: "13", kit: "livewire", label: "Livewire 4", package: "laravel/livewire-starter-kit:dev-main", php_min: "8.3", php_max: "8.5", preview: true },
+    LaravelTemplate { id: "12", laravel: "12", kit: "none", label: "", package: "laravel/laravel:^12.0", php_min: "8.2", php_max: "8.5", preview: false },
+    LaravelTemplate { id: "12-react", laravel: "12", kit: "react", label: "React 19", package: "laravel/react-starter-kit:^1.0", php_min: "8.2", php_max: "8.5", preview: false },
+    LaravelTemplate { id: "12-vue", laravel: "12", kit: "vue", label: "Vue 3.5", package: "laravel/vue-starter-kit:^1.0", php_min: "8.2", php_max: "8.5", preview: false },
+    LaravelTemplate { id: "12-livewire", laravel: "12", kit: "livewire", label: "Livewire 3", package: "laravel/livewire-starter-kit:^1.0", php_min: "8.2", php_max: "8.5", preview: false },
+];
+
+/// "8.3" → (8, 3), para comparar minors.
+fn minor_key(v: &str) -> Option<(u32, u32)> {
+    let (a, b) = v.split_once('.')?;
+    Some((a.parse().ok()?, b.parse().ok()?))
+}
+
+impl LaravelTemplate {
+    fn accepts(&self, php: &str) -> bool {
+        match (minor_key(php), minor_key(self.php_min), minor_key(self.php_max)) {
+            (Some(p), Some(lo), Some(hi)) => lo <= p && p <= hi,
+            _ => false,
+        }
     }
+}
+
+#[tauri::command]
+pub fn laravel_templates() -> Vec<LaravelTemplate> {
+    LARAVEL_TEMPLATES.to_vec()
 }
 
 /// Cria o projeto com `composer create-project` (e `npm install` + build
@@ -958,10 +995,16 @@ pub async fn laravel_create(app: AppHandle, input: NewLaravel) -> CmdResult<Stri
     if !valid {
         return Err(t!("use só letras, números, - e _ no nome"));
     }
-    let package = kit_package(&input.kit).ok_or_else(|| t!("starter kit desconhecido"))?;
-    if !LARAVEL_PHP.contains(&input.php.as_str()) {
-        return Err(t!("o Laravel 13 precisa do PHP 8.3, 8.4 ou 8.5"));
+    let tpl = LARAVEL_TEMPLATES.iter().find(|t| t.id == input.template).ok_or_else(|| t!("starter kit desconhecido"))?;
+    if !tpl.accepts(&input.php) {
+        return Err(t!(
+            "o Laravel {v} precisa do PHP {a} a {b}",
+            v = tpl.laravel,
+            a = tpl.php_min,
+            b = tpl.php_max
+        ));
     }
+    let (package, with_node) = (tpl.package, tpl.kit != "none");
     if !input.root.is_dir() {
         return Err(t!("a pasta escolhida não existe"));
     }
@@ -976,13 +1019,13 @@ pub async fn laravel_create(app: AppHandle, input: NewLaravel) -> CmdResult<Stri
     if !larafim_runtimes::extras::composer_path(&paths).is_file() {
         return Err(t!("o Composer ainda não foi baixado (instale um PHP pelo Larafim)"));
     }
-    if input.kit != "none" && larafim_runtimes::node::list_installed(&paths.node_dir()).is_empty() {
+    if with_node && larafim_runtimes::node::list_installed(&paths.node_dir()).is_empty() {
         return Err(t!("os starter kits precisam do Node.js: instale em Configurações › Node.js"));
     }
     // Os atalhos (php, composer, npm) escolhem as versões; LARAFIM_PHP fixa o PHP.
     crate::terminal::ensure_shims(&app)?;
     let mut command = format!("composer create-project {package} \"{name}\" --no-interaction --prefer-dist");
-    if input.kit != "none" {
+    if with_node {
         command.push_str(&format!(" && cd \"{name}\" && npm install && npm run build"));
     }
     let key = format!("create:{}", target.display().to_string().to_lowercase());
@@ -1000,7 +1043,7 @@ pub async fn laravel_create(app: AppHandle, input: NewLaravel) -> CmdResult<Stri
             env: vec![("LARAFIM_PHP".into(), input.php.clone()), ("COMPOSER_NO_INTERACTION".into(), "1".into())],
         })
         .map_err(|e| e.to_string())?;
-    tracing::info!(name, kit = input.kit, "criando projeto Laravel");
+    tracing::info!(name, template = tpl.id, package, "criando projeto Laravel");
     Ok(key)
 }
 
@@ -1048,4 +1091,41 @@ pub fn on_process_exit(app: &AppHandle, key: &str, code: Option<i32>) {
             Created { key, path: job.path.clone(), ok: result.is_ok(), error: result.err() },
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn laravel_templates_are_pinned_and_consistent() {
+        let mut ids = std::collections::HashSet::new();
+        for t in LARAVEL_TEMPLATES {
+            assert!(ids.insert(t.id), "id repetido: {}", t.id);
+            // Vai para o cmd.exe: só caracteres de nome de pacote e versão.
+            assert!(t.package.bytes().all(|b| b.is_ascii_alphanumeric() || b"/:^.-".contains(&b)), "{}", t.package);
+            let (pkg, version) = t.package.split_once(':').expect("versão fixa");
+            assert!(pkg.starts_with("laravel/"), "{}", t.package);
+            // Branch em desenvolvimento só quando marcado como prévia.
+            assert_eq!(version.starts_with("dev-"), t.preview, "{}", t.id);
+            assert!(minor_key(t.php_min) <= minor_key(t.php_max) && minor_key(t.php_min).is_some(), "{}", t.id);
+            assert_eq!(t.kit == "none", t.label.is_empty(), "{}", t.id);
+        }
+        // Todo grupo tem o "só Laravel" e um modelo estável (sem prévia).
+        for v in ["13", "12"] {
+            assert!(LARAVEL_TEMPLATES.iter().any(|t| t.laravel == v && t.kit == "none" && !t.preview), "{v}");
+        }
+    }
+
+    #[test]
+    fn php_range_is_checked() {
+        let find = |id: &str| LARAVEL_TEMPLATES.iter().find(|t| t.id == id).unwrap();
+        assert!(find("13").accepts("8.3") && find("13").accepts("8.5"));
+        assert!(!find("13").accepts("8.2") && !find("13").accepts("8.6"));
+        assert!(find("12-react").accepts("8.2"));
+        // 8.10 é maior que 8.5 (comparação numérica, não de texto).
+        for bad in ["8.10", "", "8", "x.y", "8.3; calc", "../8.3"] {
+            assert!(!find("13").accepts(bad), "{bad:?}");
+        }
+    }
 }

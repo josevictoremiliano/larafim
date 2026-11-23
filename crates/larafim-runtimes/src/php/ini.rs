@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 /// `gd2` é o nome antigo do `gd` (PHP 7.4).
 pub const DEFAULT_EXTENSIONS: &[&str] = &[
     "curl", "fileinfo", "gd", "gd2", "intl", "mbstring", "exif", "mysqli", "openssl",
-    "pdo_mysql", "pdo_sqlite", "sqlite3", "sodium", "zip",
+    "pdo_mysql", "pdo_pgsql", "pdo_sqlite", "pgsql", "sqlite3", "sodium", "zip",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -77,28 +77,51 @@ pub fn set_directive(ini: &str, key: &str, value: &str) -> String {
     out.join("\r\n") + "\r\n"
 }
 
-/// Atualiza um `php.ini` gerado por versões antigas do Larafim: só troca
-/// `error_reporting = E_ALL` (padrão do php.ini-development) para não exibir
-/// avisos de obsolescência. Se a pessoa mudou o valor, nada é alterado.
-pub fn upgrade(ini: &str) -> Option<String> {
-    let old = ini.lines().any(|l| {
-        let mut parts = l.splitn(2, '=');
-        parts.next().map(str::trim) == Some("error_reporting") && parts.next().map(str::trim) == Some("E_ALL")
-    });
-    old.then(|| set_directive(ini, "error_reporting", "E_ALL & ~E_DEPRECATED"))
+/// Valor ativo de uma diretiva: a última linha não comentada vale, como no PHP.
+/// Tira o comentário do fim da linha (`; ...`).
+pub fn directive(ini: &str, key: &str) -> Option<String> {
+    ini.lines().rev().find_map(|l| {
+        let (k, v) = l.trim_start().split_once('=')?;
+        (k.trim() == key).then(|| v.split(';').next().unwrap_or_default().trim().to_string())
+    })
 }
 
-/// Atualiza o `php.ini` de cada PHP instalado (ver [`upgrade`]).
-pub fn upgrade_all(php_root: &Path) {
-    let Ok(dirs) = std::fs::read_dir(php_root) else { return };
-    for dir in dirs.flatten() {
-        let path = dir.path().join("php.ini");
-        if let Some(new) = read(&path).ok().and_then(|t| upgrade(&t))
-            && let Err(e) = write(&path, &new)
-        {
-            tracing::warn!(?path, "não deu para atualizar o php.ini: {e}");
-        }
+/// Partes de um `error_reporting` (`E_ALL & ~E_DEPRECATED` → ["E_ALL", "~E_DEPRECATED"]).
+fn report_parts(value: &str) -> Vec<String> {
+    value.split('&').map(|p| p.split_whitespace().collect::<String>()).filter(|p| !p.is_empty()).collect()
+}
+
+/// Os avisos de obsolescência (`E_DEPRECATED`) aparecem? Sem a diretiva, o
+/// padrão do PHP 8 é `E_ALL`, que mostra.
+pub fn deprecations_shown(ini: &str) -> bool {
+    !directive(ini, "error_reporting").is_some_and(|v| report_parts(&v).iter().any(|p| p == "~E_DEPRECATED"))
+}
+
+/// Mostra ou esconde os avisos de obsolescência mexendo só no `~E_DEPRECATED`
+/// do `error_reporting` atual (o resto do valor, como `~E_NOTICE`, fica).
+pub fn set_deprecations(ini: &str, show: bool) -> String {
+    if deprecations_shown(ini) == show {
+        return ini.to_string();
     }
+    let current = directive(ini, "error_reporting").unwrap_or_else(|| "E_ALL".into());
+    let mut parts: Vec<String> = report_parts(&current).into_iter().filter(|p| p != "~E_DEPRECATED").collect();
+    if parts.is_empty() {
+        parts.push("E_ALL".into());
+    }
+    if !show {
+        parts.push("~E_DEPRECATED".into());
+    }
+    let value = parts.join(" & ");
+    // Troca todas as linhas ativas (vale a última); sem nenhuma, cria.
+    let active = |l: &str| l.trim_start().split_once('=').is_some_and(|(k, _)| k.trim() == "error_reporting");
+    if !ini.lines().any(active) {
+        return set_directive(ini, "error_reporting", &value);
+    }
+    ini.lines()
+        .map(|l| if active(l) { format!("error_reporting = {value}") } else { l.to_string() })
+        .collect::<Vec<_>>()
+        .join("\r\n")
+        + "\r\n"
 }
 
 /// Liga/desliga uma extensão. Se a linha não existir, acrescenta no fim.
@@ -238,11 +261,24 @@ mod tests {
     }
 
     #[test]
-    fn upgrade_only_touches_default() {
-        let new = upgrade("; error_reporting\r\nerror_reporting = E_ALL\r\n").unwrap();
-        assert!(new.contains("error_reporting = E_ALL & ~E_DEPRECATED"));
-        assert!(upgrade(&new).is_none());
-        assert!(upgrade("error_reporting = E_ALL & ~E_NOTICE\r\n").is_none());
+    fn deprecations_toggle_keeps_the_rest() {
+        let ini = "; error_reporting\r\n;   Production Value: E_ALL & ~E_DEPRECATED\r\nerror_reporting = E_ALL ; comentário\r\n";
+        assert!(deprecations_shown(ini));
+        let hidden = set_deprecations(ini, false);
+        assert!(!deprecations_shown(&hidden));
+        assert!(hidden.contains("error_reporting = E_ALL & ~E_DEPRECATED\r\n"), "{hidden}");
+        assert!(hidden.contains(";   Production Value"), "comentários ficam");
+        assert_eq!(set_deprecations(&hidden, false), hidden, "nada muda se já está assim");
+        let shown = set_deprecations(&hidden, true);
+        assert!(deprecations_shown(&shown) && shown.contains("error_reporting = E_ALL\r\n"), "{shown}");
+        // Valor personalizado: só o ~E_DEPRECATED entra e sai.
+        let custom = "error_reporting=E_ALL&~E_NOTICE&~E_DEPRECATED\r\n";
+        assert_eq!(set_deprecations(custom, true), "error_reporting = E_ALL & ~E_NOTICE\r\n");
+        // Sem a diretiva (padrão E_ALL) e com linhas repetidas (vale a última).
+        assert_eq!(set_deprecations("[PHP]\r\n", false), "[PHP]\r\nerror_reporting = E_ALL & ~E_DEPRECATED\r\n");
+        let twice = "error_reporting = E_ALL & ~E_DEPRECATED\r\nerror_reporting = E_ALL\r\n";
+        assert!(deprecations_shown(twice));
+        assert!(!deprecations_shown(&set_deprecations(twice, false)));
     }
 
     #[test]

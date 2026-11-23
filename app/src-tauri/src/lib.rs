@@ -119,6 +119,8 @@ pub fn run() {
             php::php_remove,
             php::php_extensions,
             php::php_set_extension,
+            php::php_deprecations,
+            php::php_set_deprecations,
             php::php_open_ini,
             php::php_open_folder,
             php::php_match,
@@ -192,6 +194,7 @@ pub fn run() {
             redis::project_install_predis,
             tools::xdebug_info,
             tools::xdebug_set,
+            tools::laravel_templates,
             tools::laravel_create,
             services::suggest_own_port,
             services::own_start,
@@ -217,8 +220,6 @@ pub fn run() {
             tray::create(app.handle())?;
             php::start_update_checker(app.handle().clone());
             updates::start_checker(app.handle().clone());
-            // Antes do servidor: os PHPs sobem já com o php.ini atualizado.
-            larafim_runtimes::php::ini::upgrade_all(&app.state::<AppState>().paths.php_dir());
             server::start(app.handle());
             terminal::refresh_on_start(app.handle());
             let autostart = app.state::<AppState>().config.lock().map(|c| c.start_with_windows).unwrap_or(false);
