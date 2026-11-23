@@ -98,8 +98,8 @@ Um "S3 de mentira" para testar upload de arquivos como na AWS, sem custo. Usa o
 Opcional. Em **Adicionar serviço › Filas e cache › Redis**, escolha onde ele roda:
 
 - **Windows (nativo)**, o padrão: o Larafim baixa o `redis-server.exe` (~14 MB) das compilações do
-  projeto [redis-windows](https://github.com/redis-windows/redis-windows), conferindo o SHA-256 do
-  release. O Redis oficial não publica binários para Windows.
+  projeto [redis-windows](https://github.com/redis-windows/redis-windows). A versão e o SHA-256 estão
+  fixados no código. Esse modo funciona sem Docker ou WSL.
 - **Docker**: contêiner `redis:7.4-alpine` com os dados num volume. O Docker Desktop precisa estar aberto.
 - **WSL2**: usa o `redis-server` da distribuição escolhida. Instale antes pelo
   [repositório oficial](https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/install-redis-on-windows/)
@@ -107,5 +107,8 @@ Opcional. Em **Adicionar serviço › Filas e cache › Redis**, escolha onde el
 
 Nos três casos ele escuta só em `127.0.0.1`, liga quando um projeto online precisa e desliga ao sair.
 No painel do projeto, **Serviços › Redis › Redis do Larafim (filas)** mostra a prévia e grava
-`QUEUE_CONNECTION=redis`, `REDIS_CLIENT=predis`, `REDIS_HOST` e `REDIS_PORT` no `.env` (com cópia). O
-Larafim não traz a extensão `phpredis`, então o projeto precisa do pacote `predis/predis`.
+`QUEUE_CONNECTION=redis`, `REDIS_CLIENT=predis`, `REDIS_HOST`, `REDIS_PORT` e `REDIS_PASSWORD` no
+`.env` (com cópia). O Larafim usa o pacote `predis/predis` como cliente. Ao voltar para **Não
+gerenciado**, confirme a prévia para repor os valores anteriores dessas chaves. Chaves que estavam
+ausentes são comentadas. As demais configurações do `.env` são preservadas. Se o Redis foi ligado numa
+versão que ainda não guardava os valores anteriores, o seletor avisa e deixa o `.env` como está.

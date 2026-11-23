@@ -45,7 +45,13 @@ Ligar o **Reverb** configura tudo de uma vez:
    Assim funciona também em páginas `https://`, onde o navegador bloquearia `ws://127.0.0.1`.
    Chaves repetidas no `.env` são todas atualizadas (vale a última, como no Laravel e no Vite);
 4. liga o banco do projeto, se preciso (o `reverb:start` lê o cache), e inicia na hora
-   (`reverb:start --host=127.0.0.1 --port=<porta>`), mesmo com o projeto offline.
+   (`reverb:start --host=127.0.0.1 --port=<porta>`), mesmo com o projeto offline. O Larafim aguarda
+   o servidor responder antes de marcar o Reverb como ligado.
+
+Se o cache do Laravel usa o banco, o Reverb precisa da tabela de cache para iniciar. Confira as
+migrations pendentes com `php artisan migrate:status` e aplique as necessárias no banco de
+desenvolvimento. Se a página falhar ao carregar a sessão após uma atualização do PHP, selecione no
+painel do projeto uma versão de PHP compatível com o Laravel instalado. A seleção vale também para o Reverb.
    Depois, liga e desliga junto com o projeto.
 
 A porta fica guardada no projeto. Se outro programa ocupar a porta, desligue e ligue o Reverb: o

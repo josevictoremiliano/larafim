@@ -109,7 +109,7 @@
       (kind === "mariadb" || kind === "postgres"
         ? !!major && portOk
         : kind === "redis"
-          ? portOk && (backend === "docker" || !!distro)
+          ? portOk && (backend !== "wsl" || !!distro)
           : true),
   );
 

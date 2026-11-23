@@ -1,10 +1,10 @@
 //! Redis opcional do Larafim (filas e cache). Não há Redis oficial para
-//! Windows: ele roda num contêiner do Docker ou numa distribuição do WSL2.
+//! Windows: ele roda como binário de terceiros, no Docker ou no WSL2.
 //! Aqui fica a parte pura (nomes, lista do WSL, `.env`).
 
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
-use crate::envfile::EnvChange;
+use crate::envfile::{self, EnvChange};
 use crate::safety::is_wsl_distro;
 
 /// Imagem oficial do Docker Hub (versão fixa, para não mudar sozinha).
@@ -51,6 +51,23 @@ pub fn env_changes(port: u16) -> Vec<EnvChange> {
     ]
 }
 
+pub type EnvSnapshot = BTreeMap<String, Option<String>>;
+
+/// Guarda cada chave na primeira alteração, inclusive quando ela estava ausente.
+pub fn remember_env(text: &str, changes: &[EnvChange], saved: &mut EnvSnapshot) -> crate::error::Result<()> {
+    for change in envfile::apply(text, changes).1 {
+        saved.entry(change.key.clone()).or_insert_with(|| envfile::get_raw(text, &change.key).map(str::to_owned));
+    }
+    envfile::validate(&restore_env(saved))
+}
+
+pub fn restore_env(saved: &EnvSnapshot) -> Vec<EnvChange> {
+    // Uma cópia guardada só pode repor as chaves que o Redis gerencia.
+    env_changes(DEFAULT_PORT).into_iter().filter_map(|ch| {
+        saved.get(&ch.key).map(|value| EnvChange::restore(&ch.key, value.clone()))
+    }).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +98,30 @@ mod tests {
         let (out, _) = crate::envfile::apply("QUEUE_CONNECTION=database\n", &changes);
         assert_eq!(crate::envfile::get(&out, "QUEUE_CONNECTION").as_deref(), Some("redis"));
         assert_eq!(crate::envfile::get(&out, "REDIS_PORT").as_deref(), Some("6380"));
+    }
+
+    #[test]
+    fn restores_previous_values_without_touching_other_services() {
+        let original = "QUEUE_CONNECTION=sync\r\nREDIS_CLIENT=\r\nREDIS_PASSWORD=\"${LOCAL_PASSWORD}\" # exemplo\r\nDB_CONNECTION=sqlite\r\n";
+        let mut saved = EnvSnapshot::new();
+        remember_env(original, &env_changes(6379), &mut saved).unwrap();
+        let (managed, _) = envfile::apply(original, &env_changes(6379));
+        remember_env(&managed, &env_changes(6380), &mut saved).unwrap();
+        let (managed, _) = envfile::apply(&managed, &[EnvChange::set("REDIS_PORT", "6380"), EnvChange::set("MAIL_MAILER", "smtp")]);
+        let (restored, _) = envfile::apply(&managed, &restore_env(&saved));
+        assert!(restored.starts_with(original), "{restored}");
+        assert_eq!(envfile::get(&restored, "REDIS_HOST"), None);
+        assert_eq!(envfile::get(&restored, "REDIS_PORT"), None);
+        assert_eq!(envfile::get(&restored, "MAIL_MAILER").as_deref(), Some("smtp"));
+    }
+
+    #[test]
+    fn restore_rejects_injection_and_ignores_unmanaged_keys() {
+        for value in ["sync\r\nEVIL=1", "\"sem fechar", "\"x\" NEW_KEY=1"] {
+            let saved = EnvSnapshot::from([("QUEUE_CONNECTION".into(), Some(value.into()))]);
+            assert!(envfile::validate(&restore_env(&saved)).is_err());
+        }
+        let saved = EnvSnapshot::from([("APP_DEBUG".into(), Some("true".into()))]);
+        assert!(restore_env(&saved).is_empty());
     }
 }

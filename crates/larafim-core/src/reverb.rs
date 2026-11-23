@@ -33,6 +33,12 @@ pub fn pick_port(reserved: &[u16], is_free: impl Fn(u16) -> bool) -> Option<u16>
     PORTS.clone().find(|p| !reserved.contains(p) && is_free(*p))
 }
 
+/// O Reverb consulta `laravel:reverb:restart` ao iniciar com cache no banco.
+pub fn missing_cache_table(line: &str) -> bool {
+    line.contains("laravel:reverb:restart")
+        && ["SQLSTATE[42S02]", "SQLSTATE[42P01]", "no such table:"].iter().any(|code| line.contains(code))
+}
+
 /// Credenciais novas, usadas só quando o `.env` ainda não tem as suas.
 pub struct Credentials {
     pub app_id: String,
@@ -115,6 +121,14 @@ mod tests {
         assert_eq!(pick_port(&[8080, 8081], |_| true), Some(8082));
         assert_eq!(pick_port(&[8080], |p| p != 8081), Some(8082));
         assert_eq!(pick_port(&[], |_| false), None);
+    }
+
+    #[test]
+    fn identifies_missing_database_cache_in_reverb_output() {
+        assert!(missing_cache_table("SQLSTATE[42S02]: Table 'demo.cache' doesn't exist (SQL: select * from `cache` where `key` = laravel:reverb:restart)"));
+        assert!(missing_cache_table("SQLSTATE[HY000]: General error: 1 no such table: cache (SQL: select * where key = laravel:reverb:restart)"));
+        assert!(!missing_cache_table("SQLSTATE[42S02]: Table 'demo.sessions' doesn't exist"));
+        assert!(!missing_cache_table("SQLSTATE[HY000] [2002]: Connection refused (key = laravel:reverb:restart)"));
     }
 
     #[test]

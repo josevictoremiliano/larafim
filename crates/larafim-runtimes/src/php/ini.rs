@@ -77,6 +77,30 @@ pub fn set_directive(ini: &str, key: &str, value: &str) -> String {
     out.join("\r\n") + "\r\n"
 }
 
+/// Atualiza um `php.ini` gerado por versões antigas do Larafim: só troca
+/// `error_reporting = E_ALL` (padrão do php.ini-development) para não exibir
+/// avisos de obsolescência. Se a pessoa mudou o valor, nada é alterado.
+pub fn upgrade(ini: &str) -> Option<String> {
+    let old = ini.lines().any(|l| {
+        let mut parts = l.splitn(2, '=');
+        parts.next().map(str::trim) == Some("error_reporting") && parts.next().map(str::trim) == Some("E_ALL")
+    });
+    old.then(|| set_directive(ini, "error_reporting", "E_ALL & ~E_DEPRECATED"))
+}
+
+/// Atualiza o `php.ini` de cada PHP instalado (ver [`upgrade`]).
+pub fn upgrade_all(php_root: &Path) {
+    let Ok(dirs) = std::fs::read_dir(php_root) else { return };
+    for dir in dirs.flatten() {
+        let path = dir.path().join("php.ini");
+        if let Some(new) = read(&path).ok().and_then(|t| upgrade(&t))
+            && let Err(e) = write(&path, &new)
+        {
+            tracing::warn!(?path, "não deu para atualizar o php.ini: {e}");
+        }
+    }
+}
+
 /// Liga/desliga uma extensão. Se a linha não existir, acrescenta no fim.
 pub fn set_extension(ini: &str, name: &str, enabled: bool, zend: bool) -> String {
     let mut done = false;
@@ -136,6 +160,9 @@ pub fn generate(dev_ini: &str, php_dir: &Path, files_dir: &Path, cacert: &Path) 
     }
     for (key, value) in [
         ("memory_limit", "512M"),
+        // Avisos de obsolescência de versões novas do PHP quebram a página antes
+        // do Laravel assumir; o Laravel ainda os registra no log dele.
+        ("error_reporting", "E_ALL & ~E_DEPRECATED"),
         ("upload_max_filesize", "64M"),
         ("post_max_size", "64M"),
         ("max_execution_time", "120"),
@@ -204,9 +231,18 @@ mod tests {
         assert!(ini.contains(";extension=xsl\r\n"), "xsl não é padrão");
         assert!(ini.contains("\r\nzend_extension=opcache\r\n"));
         assert!(ini.contains("memory_limit = 512M"));
+        assert!(ini.contains("error_reporting = E_ALL & ~E_DEPRECATED"));
         assert!(ini.contains(&format!("curl.cainfo = \"{}\"", cacert.display())));
         // a linha de documentação continua comentada
         assert!(ini.contains(";   extension=mysqli"));
+    }
+
+    #[test]
+    fn upgrade_only_touches_default() {
+        let new = upgrade("; error_reporting\r\nerror_reporting = E_ALL\r\n").unwrap();
+        assert!(new.contains("error_reporting = E_ALL & ~E_DEPRECATED"));
+        assert!(upgrade(&new).is_none());
+        assert!(upgrade("error_reporting = E_ALL & ~E_NOTICE\r\n").is_none());
     }
 
     #[test]

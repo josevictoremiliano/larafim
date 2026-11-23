@@ -45,7 +45,7 @@ fn view_of(app: &AppHandle, path: &Path) -> Result<ProjectView, String> {
         .ok_or_else(|| t!("projeto não encontrado"))
 }
 
-fn notify_projects(app: &AppHandle) {
+pub(crate) fn notify_projects(app: &AppHandle) {
     let state = app.state::<AppState>();
     let roots = state.config.lock().unwrap().roots.clone();
     let store = state.projects.lock().unwrap();
@@ -523,13 +523,21 @@ pub async fn worker_set(app: AppHandle, path: PathBuf, worker: String, enabled: 
     } else if !enabled {
         app.state::<ServerState>().dev.stop(&worker_key(&path, &worker));
     }
+    if worker == "reverb" {
+        crate::server::after_change(&app, false);
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn worker_restart(app: AppHandle, path: PathBuf, worker: String) -> CmdResult<()> {
     let view = view_of(&app, &path)?;
-    start_worker(&app, &view, &worker)
+    if worker == "reverb" {
+        crate::server::start_project_db(&app, &view).await?;
+        start_reverb(&app, &view).await
+    } else {
+        start_worker(&app, &view, &worker)
+    }
 }
 
 /// Status e saída de qualquer processo gerenciado, pela chave.
@@ -786,10 +794,49 @@ pub fn reverb_preview(app: AppHandle, path: PathBuf) -> CmdResult<ReverbPreview>
     })
 }
 
+/// Espera uma resposta HTTP do Reverb. A porta TCP pode abrir antes de o
+/// Laravel terminar de carregar o cache e iniciar o loop de requisições.
+async fn start_reverb(app: &AppHandle, view: &ProjectView) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::time::{Duration, sleep, timeout};
+
+    let port = view.reverb_port.ok_or_else(|| t!("ligue o Reverb pelo painel do projeto para escolher a porta"))?;
+    let key = worker_key(&view.path, "reverb");
+    let dev = &app.state::<ServerState>().dev;
+    start_worker(app, view, "reverb")?;
+    let ready = timeout(Duration::from_secs(12), async {
+        while dev.is_running(&key) {
+            let probe = timeout(Duration::from_millis(300), async {
+                let mut socket = tokio::net::TcpStream::connect((reverb::HOST, port)).await?;
+                socket.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").await?;
+                let mut prefix = [0u8; 5];
+                socket.read_exact(&mut prefix).await?;
+                Ok::<bool, std::io::Error>(&prefix == b"HTTP/")
+            }).await;
+            if matches!(probe, Ok(Ok(true))) && dev.is_running(&key) {
+                return true;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+        false
+    }).await.unwrap_or(false);
+    if ready {
+        return Ok(());
+    }
+    if dev.is_running(&key) {
+        dev.stop(&key);
+        return Err(t!("o Reverb não respondeu na porta {port}. Confira a configuração do projeto.", port = port));
+    }
+    if dev.logs(&key).iter().any(|line| reverb::missing_cache_table(line)) {
+        return Err(t!("o Reverb precisa da tabela de cache do Laravel. Confira as migrations e rode php artisan migrate no banco de desenvolvimento."));
+    }
+    Err(t!("o Reverb encerrou antes de aceitar conexões. Confira o log do processo."))
+}
+
 /// Liga o Reverb do projeto: escolhe a porta, ajusta o `.env` (com cópia),
 /// marca para ligar junto com o projeto e já inicia.
 async fn reverb_enable(app: &AppHandle, path: &Path) -> Result<(), String> {
-    let view = view_of(app, path)?;
+    let mut view = view_of(app, path)?;
     if view.kind != ProjectKind::Laravel {
         return Err(t!("workers só existem em projetos Laravel"));
     }
@@ -798,6 +845,8 @@ async fn reverb_enable(app: &AppHandle, path: &Path) -> Result<(), String> {
     }
     let port = reverb_port_for(app, path)?;
     let public = reverb_public(app, path)?;
+    // O `reverb:start` lê o cache mesmo com o projeto offline.
+    crate::server::start_project_db(app, &view).await?;
     let env = envfile::env_path(path);
     let example = path.join(".env.example");
     if !env.exists() && example.exists() {
@@ -807,22 +856,23 @@ async fn reverb_enable(app: &AppHandle, path: &Path) -> Result<(), String> {
         let text = std::fs::read_to_string(&env).map_err(|e| e.to_string())?;
         envfile::write(path, &reverb::env_changes(&text, port, &public, &reverb_credentials())).map_err(|e| e.to_string())?;
         clear_config_cache(app, path);
-        // A fila também publica eventos: precisa ler o BROADCAST_* novo.
-        restart_queue_if_running(app, path)?;
     }
-    update_project(app, path, |p| {
+    view.reverb_port = Some(port);
+    start_reverb(app, &view).await?;
+    if let Err(error) = update_project(app, path, |p| {
         p.reverb_port = Some(port);
         if !p.workers.iter().any(|w| w == "reverb") {
             p.workers.push("reverb".into());
         }
-    })?;
-    // O `reverb:start` lê o cache (que costuma estar no banco): com o projeto
-    // offline, o banco dele pode estar desligado.
-    crate::server::start_project_db(app, &view).await?;
+    }) {
+        app.state::<ServerState>().dev.stop(&worker_key(path, "reverb"));
+        return Err(error);
+    }
     tracing::info!(path = %path.display(), port, "Reverb do projeto ligado");
-    start_worker(app, &view_of(app, path)?, "reverb")?;
     // Rotas novas: o gateway passa a repassar o WebSocket para a porta.
     crate::server::after_change(app, false);
+    // A fila também publica eventos: precisa ler o BROADCAST_* novo.
+    restart_queue_if_running(app, path)?;
     Ok(())
 }
 
@@ -877,9 +927,13 @@ pub struct NewLaravel {
     database: String,
 }
 
+/// PHPs suportados pelo Laravel 13: fora disso o Composer cai para uma versão
+/// antiga do Laravel (ou o app quebra com avisos de obsolescência).
+pub const LARAVEL_PHP: [&str; 3] = ["8.3", "8.4", "8.5"];
+
 fn kit_package(kit: &str) -> Option<&'static str> {
     match kit {
-        "none" => Some("laravel/laravel"),
+        "none" => Some("laravel/laravel:^13.0"),
         "react" => Some("laravel/react-starter-kit"),
         "vue" => Some("laravel/vue-starter-kit"),
         "livewire" => Some("laravel/livewire-starter-kit"),
@@ -897,6 +951,9 @@ pub async fn laravel_create(app: AppHandle, input: NewLaravel) -> CmdResult<Stri
         return Err(t!("use só letras, números, - e _ no nome"));
     }
     let package = kit_package(&input.kit).ok_or_else(|| t!("starter kit desconhecido"))?;
+    if !LARAVEL_PHP.contains(&input.php.as_str()) {
+        return Err(t!("o Laravel 13 precisa do PHP 8.3, 8.4 ou 8.5"));
+    }
     if !input.root.is_dir() {
         return Err(t!("a pasta escolhida não existe"));
     }

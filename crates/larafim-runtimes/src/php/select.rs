@@ -165,6 +165,7 @@ mod tests {
             reverb_port: None,
             queues: Vec::new(),
             queue_connection: None,
+            queue_redis_env: None,
             online: false,
         };
         store.upsert(cfg(&loja, "loja", None)).unwrap();

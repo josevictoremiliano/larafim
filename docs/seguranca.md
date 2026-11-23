@@ -41,9 +41,9 @@ Código: [`download.rs`](../crates/larafim-runtimes/src/download.rs),
   `getcomposer.org`, `curl.se`, `xdebug.org`. Um catálogo adulterado não consegue apontar para outro
   servidor (nem com truques como `github.com@evil.com`).
 - **SHA-256 obrigatório.** O hash vem da fonte oficial (catálogo do PHP, `SHASUMS256.txt` do Node, API
-  da MariaDB, campo `digest` do GitHub) ou fica fixo no código (Adminer). O arquivo é gravado como
-  `.part` e só vira "pronto" depois de conferido. O Redis nativo vem só de
-  `github.com/redis-windows/redis-windows`, com URL e nome do pacote conferidos e o `digest` do release.
+  da MariaDB, campo `digest` do GitHub) ou fica fixo no código (Adminer e Redis nativo). O arquivo é
+  gravado como `.part` e só vira "pronto" depois de conferido. O pacote MSYS2 de
+  `github.com/redis-windows/redis-windows` tem versão, URL e SHA-256 fixados no código.
 - **Versões viram nomes de pasta só se forem seguras.** Versões e tags lidas dos catálogos passam por
   `is_safe_component`: nada de `..`, `/`, `\`, `:`, nomes reservados do Windows ou caracteres
   estranhos. Isso importa porque reinstalar uma versão apaga a pasta antiga.
@@ -67,6 +67,7 @@ Código: [`hosts.rs`](../crates/larafim-server/src/hosts.rs).
 - O ajudante que roda como administrador **valida tudo de novo** antes de gravar (não confia no
   processo que o chamou), aceita no máximo 2000 domínios e guarda um backup do `hosts`.
 - O sufixo (`.offline`) também é validado ao salvar as configurações.
+- Os aliases `db`, `mail`, `s3` e seus subdomínios são reservados para serviços locais.
 
 ### `.env`
 
@@ -79,6 +80,9 @@ Código: [`envfile.rs`](../crates/larafim-core/src/envfile.rs).
   valor tiver aspas simples, vai entre aspas duplas com `\`, `"` e `$` escapados. `${APP_KEY}` não é
   expandido e uma `\` no fim não quebra o arquivo.
 - Antes da primeira mudança, o `.env` original vai para `.env.larafim.bak` (**Desfazer**).
+- O Redis guarda os valores anteriores das chaves que altera no projeto, cifrados com DPAPI. Ao
+  restaurar, o Larafim valida as chaves e os valores de uma linha e mantém a sintaxe original,
+  inclusive referências a outras variáveis. A senha fica mascarada na prévia.
 - Reverb ([`reverb.rs`](../crates/larafim-core/src/reverb.rs)): valores já existentes no `.env` do
   projeto (a chave do app, copiada para `VITE_REVERB_APP_KEY`) passam pela mesma validação e
   escape; a porta vem só da faixa 8080–8179, nunca do arquivo.
