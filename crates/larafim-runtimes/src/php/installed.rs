@@ -49,6 +49,21 @@ pub fn list_installed(php_dir: &Path) -> Vec<InstalledPhp> {
     list
 }
 
+/// Conserta o `php.ini` das versões instaladas cuja pasta mudou de lugar
+/// (veja `ini::relocate`). Devolve as versões consertadas.
+pub fn repair_moved(php_dir: &Path) -> Vec<String> {
+    let mut fixed = Vec::new();
+    for php in list_installed(php_dir) {
+        let Ok(text) = super::ini::read(&php.ini()) else { continue };
+        let Some(updated) = super::ini::relocate(&text, &php.dir) else { continue };
+        match super::ini::write(&php.ini(), &updated) {
+            Ok(()) => fixed.push(php.version),
+            Err(e) => tracing::warn!("não foi possível consertar o php.ini do PHP {}: {e}", php.version),
+        }
+    }
+    fixed
+}
+
 /// A versão mais nova de cada minor (a que os projetos usam).
 pub fn current_per_minor(installed: &[InstalledPhp]) -> Vec<&InstalledPhp> {
     let mut seen = std::collections::HashSet::new();

@@ -27,6 +27,16 @@
     }
   }
 
+  // Baixa, confere a assinatura e instala; o app fecha e reabre sozinho.
+  async function install() {
+    error = null;
+    try {
+      await updates.install();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   const open = (link: ProjectLink) => updates.openLink(link).catch((e) => (error = String(e)));
 
   const when = (secs: number | null) =>
@@ -34,6 +44,10 @@
 
   const updateTitle = $derived.by(() => {
     if (!status) return t("Atualizações");
+    if (status.installing && status.latest)
+      return status.progress === null
+        ? t("Baixando a versão {v}…", { v: status.latest })
+        : t("Baixando a versão {v}… {p}%", { v: status.latest, p: status.progress });
     if (status.checking) return t("Procurando atualizações…");
     if (status.available && status.latest) return t("Versão {v} disponível", { v: status.latest });
     if (status.checked_at && !status.error && !status.latest) return t("Nenhuma versão publicada ainda");
@@ -42,6 +56,7 @@
   });
 
   const updateDescription = $derived.by(() => {
+    if (status?.installing) return t("O Larafim fecha, instala a versão nova e abre de novo sozinho.");
     if (status?.error) return t("Não foi possível verificar: {e}", { e: status.error });
     const checked = when(status?.checked_at ?? null);
     return checked ? t("Última verificação: {when}", { when: checked }) : t("Ainda não verificado nesta sessão");
@@ -83,15 +98,16 @@
 {:else}
   <SettingRow icon="refresh" title={updateTitle} description={updateDescription}>
     {#if status?.available}
-      <button class="btn accent" onclick={() => open("update")}><Glyph name="openExternal" /> {t("Baixar")}</button>
+      <button class="btn" onclick={() => open("update")}><Glyph name="openExternal" /> {t("Novidades")}</button>
+      <button class="btn accent" disabled={status.installing} onclick={install}>{t("Atualizar e reiniciar")}</button>
     {/if}
-    <button class="btn" disabled={status?.checking} onclick={check}>{t("Verificar atualizações")}</button>
+    <button class="btn" disabled={status?.checking || status?.installing} onclick={check}>{t("Verificar atualizações")}</button>
   </SettingRow>
   {#if app.config}
     <SettingRow
       icon="globe"
       title={t("Verificar automaticamente")}
-      description={t("Consulta o GitHub ao abrir e a cada 6 horas. Só avisa; nada é baixado sozinho.")}
+      description={t("Consulta o GitHub ao abrir e a cada 6 horas. Só avisa: nada é baixado sem você pedir.")}
     >
       <span class="caption">{app.config.check_updates ? t("Ativado") : t("Desativado")}</span>
       <Toggle

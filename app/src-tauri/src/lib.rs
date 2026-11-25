@@ -81,6 +81,9 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // Atualizações do próprio Larafim; só usado pelo Rust (updates.rs),
+        // sem permissão para a interface chamar o plugin direto.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState { paths, config: Mutex::new(config), projects: Mutex::new(projects) })
         .manage(php::PhpState::default())
         .manage(node::NodeState::default())
@@ -101,6 +104,7 @@ pub fn run() {
             tray_panel::tray_fit,
             updates::app_update_status,
             updates::app_update_check,
+            updates::app_update_install,
             updates::open_project_link,
             tray_panel::tray_action,
             projects::list_projects,
@@ -219,6 +223,11 @@ pub fn run() {
         ])
         .setup(|app| {
             tray::create(app.handle())?;
+            // Antes do servidor: php.ini com caminhos da pasta antiga não carrega extensão nenhuma.
+            let fixed = larafim_runtimes::php::installed::repair_moved(&app.state::<AppState>().paths.php_dir());
+            if !fixed.is_empty() {
+                tracing::info!(?fixed, "php.ini apontava para outra pasta; caminhos corrigidos");
+            }
             php::start_update_checker(app.handle().clone());
             updates::start_checker(app.handle().clone());
             server::start(app.handle());

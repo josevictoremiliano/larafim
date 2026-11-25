@@ -203,6 +203,36 @@ pub fn migrate(old_ini: &str, old_dir: &Path, new_dir: &Path) -> String {
     old_ini.replace(&old_dir.display().to_string(), &new_dir.display().to_string())
 }
 
+/// Conserta os caminhos absolutos do `php.ini` quando a pasta de dados mudou
+/// de lugar (ex.: renomeação Sentinel → Larafim ou `LARAFIM_HOME` novo): sem
+/// isso o `extension_dir` aponta para o nada e nenhuma extensão carrega.
+/// Só age se o `extension_dir` atual não existe e tem o formato que o próprio
+/// Larafim grava (`<raiz>\php\<versão>\ext`); devolve `None` se não há o que fazer.
+pub fn relocate(ini: &str, php_dir: &Path) -> Option<String> {
+    let current = directive(ini, "extension_dir")?;
+    let old_ext = Path::new(current.trim_matches('"'));
+    let new_ext = php_dir.join("ext");
+    if old_ext.is_dir() || !new_ext.is_dir() {
+        return None;
+    }
+    let same = |a: Option<&std::ffi::OsStr>, b: Option<&std::ffi::OsStr>| {
+        matches!((a, b), (Some(a), Some(b)) if a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy()))
+    };
+    // ext ← <versão> ← php ← <raiz dos runtimes>
+    let old_ver = old_ext.parent()?;
+    let old_php = old_ver.parent()?;
+    let old_root = old_php.parent()?;
+    let new_root = php_dir.parent()?.parent()?;
+    let shaped = same(old_ext.file_name(), Some("ext".as_ref()))
+        && same(old_ver.file_name(), php_dir.file_name())
+        && same(old_php.file_name(), Some("php".as_ref()))
+        && old_root.components().count() >= 2;
+    if !shaped || old_root == new_root {
+        return None;
+    }
+    Some(ini.replace(&old_root.display().to_string(), &new_root.display().to_string()))
+}
+
 pub fn read(path: &Path) -> Result<String> {
     std::fs::read_to_string(path).map_err(|e| Error::io(path, e))
 }
@@ -294,6 +324,47 @@ mod tests {
         let exts = list_extensions(&ini, &dir.path().join("ext"));
         let names: Vec<_> = exts.iter().map(|e| (e.name.as_str(), e.enabled)).collect();
         assert_eq!(names, [("curl", false), ("mysqli", true), ("xsl", true)]);
+    }
+
+    #[test]
+    fn relocate_fixes_moved_data_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let php_dir = tmp.path().join("Larafim").join("runtimes").join("php").join("8.5.13");
+        std::fs::create_dir_all(php_dir.join("ext")).unwrap();
+        let old_root = tmp.path().join("Sentinel").join("runtimes");
+        let ini = format!(
+            "extension_dir = \"{r}\\php\\8.5.13\\ext\"\r\ncurl.cainfo = \"{r}\\cacert.pem\"\r\nmemory_limit = 1G\r\n",
+            r = old_root.display()
+        );
+        let fixed = relocate(&ini, &php_dir).expect("deveria consertar");
+        let new_root = tmp.path().join("Larafim").join("runtimes");
+        assert!(fixed.contains(&format!("extension_dir = \"{}\"", php_dir.join("ext").display())), "{fixed}");
+        assert!(fixed.contains(&format!("curl.cainfo = \"{}\\cacert.pem\"", new_root.display())));
+        assert!(fixed.contains("memory_limit = 1G"), "customização mantida");
+        assert!(!fixed.contains("Sentinel"));
+        // Já consertado: nada a fazer.
+        assert_eq!(relocate(&fixed, &php_dir), None);
+    }
+
+    #[test]
+    fn relocate_ignores_unexpected_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let php_dir = tmp.path().join("runtimes").join("php").join("8.5.13");
+        std::fs::create_dir_all(php_dir.join("ext")).unwrap();
+        for bad in [
+            r#"extension_dir = "C:\x\ext""#,                         // formato estranho
+            r#"extension_dir = "C:\Old\runtimes\php\8.4.1\ext""#,     // outra versão
+            r#"extension_dir = "ext""#,                               // relativo
+            r#"extension_dir = "\php\8.5.13\ext""#,                   // raiz curta demais
+            r#"extension_dir = "C:\Old\runtimes\php\..\8.5.13\ext""#, // com ..
+        ] {
+            assert_eq!(relocate(bad, &php_dir), None, "{bad}");
+        }
+        assert_eq!(relocate("memory_limit = 1G\r\n", &php_dir), None, "sem extension_dir");
+        // extension_dir antigo ainda existe: o usuário quis assim, não mexe.
+        let other = tmp.path().join("other").join("php").join("8.5.13").join("ext");
+        std::fs::create_dir_all(&other).unwrap();
+        assert_eq!(relocate(&format!("extension_dir = \"{}\"", other.display()), &php_dir), None);
     }
 
     #[test]

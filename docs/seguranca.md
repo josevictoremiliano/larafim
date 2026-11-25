@@ -144,12 +144,21 @@ Código: [`tauri.conf.json`](../app/src-tauri/tauri.conf.json),
   `localhost` (`is_local_url`), `open_folder` só abre pastas que existem e os logs só aceitam nomes
   `*.log` dentro da pasta de logs do projeto.
 
-### Aviso de versão nova
+### Versão nova e atualização
 
 Código: [`app_update.rs`](../crates/larafim-runtimes/src/app_update.rs),
 [`updates.rs`](../app/src-tauri/src/updates.rs).
 
-- Só **avisa**: nada é baixado nem executado sozinho. A pessoa baixa pela página da release.
+- A verificação só **avisa**. O instalador novo só é baixado e executado quando a pessoa clica em
+  *Atualizar e reiniciar*.
+- A atualização usa o *updater* do Tauri. O instalador é conferido pela **assinatura** (minisign) contra
+  a chave pública embutida no app (`plugins.updater.pubkey` no `tauri.conf.json`). Um instalador
+  adulterado ou de outra origem é recusado, mesmo vindo de um `latest.json` alterado. A chave privada
+  fica só no *secret* `TAURI_SIGNING_PRIVATE_KEY` do GitHub.
+- Além da assinatura, o link do instalador precisa ser um arquivo de release **deste** repositório
+  (`updates::is_release_asset`).
+- O plugin só é usado pelo Rust: a interface não tem permissão para chamá-lo direto, só o comando
+  `app_update_install`, sem argumentos.
 - A resposta do GitHub é validada: a tag precisa ser `vX.Y.Z` estável e o link precisa ser uma página de
   release **deste** repositório. Uma resposta adulterada não leva o usuário para outro site.
 - A interface nunca envia URLs para abrir: ela pede um link pelo nome (`repo`, `issues`, `update`…), e o
@@ -191,6 +200,7 @@ Código: [`app_update.rs`](../crates/larafim-runtimes/src/app_update.rs),
 | CA restrita ao domínio local | `tls::tests::ca_issues_only_inside_tld` |
 | Nomes de banco | `mariadb::tests::names_and_ini` |
 | Release adulterada no aviso de versão | `app_update::tests::refuses_tampered_release` |
+| Instalador de fora do repositório | `updates::tests::instalador_so_das_releases_do_repositorio` |
 
 Para rodar só esses: `cargo test --workspace -- safety envfile hosts download archive tampered resolve pages tls`.
 
@@ -201,8 +211,9 @@ Para rodar só esses: `cargo test --workspace -- safety envfile hosts download a
   atualizações.
 - **Releases verificáveis:** cada instalador sai do workflow público, com `SHA256SUMS.txt` e atestação
   de origem (`gh attestation verify`).
-- **Sem segredos no repositório:** chaves de assinatura e tokens, quando existirem, ficam só em
-  *secrets* do GitHub.
+- **Atualizações assinadas:** o `.sig` de cada instalador é gerado no workflow com a chave privada do
+  updater, guardada só em *secret* do GitHub.
+- **Sem segredos no repositório:** chaves de assinatura e tokens ficam só em *secrets* do GitHub.
 
 ## Ao mexer no código
 

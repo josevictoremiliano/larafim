@@ -77,7 +77,7 @@
   }
   const groups = $derived<Item[][]>([
     ...(update?.available && update.latest
-      ? [[{ icon: "refresh" as GlyphName, label: t("Atualizar o Larafim"), hint: update.latest, run: () => updates.openLink("update") }]]
+      ? [[{ icon: "refresh" as GlyphName, label: t("Atualizar o Larafim"), hint: update.latest, run: () => updates.install().catch(() => api.openSettings("about")) }]]
       : []),
     [
       { icon: "apps", label: t("Abrir Larafim"), run: backend("main") },

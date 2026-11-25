@@ -655,7 +655,6 @@
   "versão do RustFS inválida no catálogo": "invalid RustFS version in the catalog",
   "versão do Mailpit inválida no catálogo": "invalid Mailpit version in the catalog",
   "Versão {v} do Larafim disponível.": "Larafim {v} is available.",
-  "Baixar": "Download",
   "Detalhes": "Details",
   "Lembrar depois": "Remind me later",
   "Atualizações": "Updates",
@@ -678,7 +677,6 @@
   "PHP, Node e bancos locais para seus projetos no Windows.": "Local PHP, Node and databases for your projects on Windows.",
   "Feito por": "Made by",
   "Verificar automaticamente": "Check automatically",
-  "Consulta o GitHub ao abrir e a cada 6 horas. Só avisa; nada é baixado sozinho.": "Checks GitHub at startup and every 6 hours. It only notifies you; nothing is downloaded automatically.",
   "Este computador": "This computer",
   "Atualização disponível": "Update available",
   "Atualizar o Larafim": "Update Larafim",
@@ -797,5 +795,14 @@
   "Projetos avulsos": "Standalone projects",
   "{v} disponível": "{v} available",
   "minha-loja": "my-shop",
-  "e": "and"
+  "e": "and",
+  "Baixando a versão {v}…": "Downloading version {v}…",
+  "Baixando a versão {v}… {p}%": "Downloading version {v}… {p}%",
+  "Atualizar e reiniciar": "Update and restart",
+  "O Larafim fecha, instala a versão nova e abre de novo sozinho.": "Larafim will close, install the new version and reopen on its own.",
+  "Novidades": "What's new",
+  "Consulta o GitHub ao abrir e a cada 6 horas. Só avisa: nada é baixado sem você pedir.": "Checks GitHub at startup and every 6 hours. It only notifies you: nothing is downloaded unless you ask.",
+  "instalado pela Microsoft Store: a Store atualiza o Larafim": "installed from the Microsoft Store: the Store updates Larafim",
+  "nenhuma versão nova encontrada": "no new version found",
+  "link do instalador fora do repositório oficial": "installer link outside the official repository"
 }

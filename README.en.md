@@ -61,22 +61,11 @@ registry, Job Objects) and downloads Windows builds of PHP, MariaDB and PostgreS
 See [CONTRIBUTING.md](CONTRIBUTING.md). AI coding agents must follow [AGENTS.md](AGENTS.md).
 The full documentation is in Portuguese, under [`docs/`](docs/README.md).
 
-## Code signing policy
+## Privacy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
-[SignPath Foundation](https://signpath.org/).
-
-- **Committers and reviewers:** the [project members](https://github.com/josevictoremiliano/larafim/graphs/contributors).
-  Outside contributions only land through a reviewed pull request.
-- **Approvers:** [@josevictoremiliano](https://github.com/josevictoremiliano).
-- **What gets signed:** only files built by the public release workflow
-  ([`release.yml`](.github/workflows/release.yml)) from a tag of this repository. Nothing built
-  outside GitHub Actions is signed.
-
-**Privacy:** Larafim does not send your data to any server. It only connects to the internet to
-download what you ask for (PHP, Node, databases and tools, from their official sources) and to check
-GitHub for a new Larafim release. That check can be turned off in
-*Settings › About › Check automatically*.
+Larafim does not send your data to any server. It only connects to the internet to download what you
+ask for (PHP, Node, databases and tools, from their official sources) and to check GitHub for a new
+Larafim release. That check can be turned off in *Settings › About › Check automatically*.
 
 ## License
 

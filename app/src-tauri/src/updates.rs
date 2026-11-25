@@ -1,7 +1,10 @@
 //! Versão nova do Larafim: confere a última release no GitHub ao abrir e a
-//! cada 6 horas (se a opção estiver ligada) e avisa as janelas. A pessoa
-//! baixa pela página da release; o app não baixa nem executa nada sozinho.
-//! Instalado pela Microsoft Store, quem atualiza é a Store: nada é consultado.
+//! cada 6 horas (se a opção estiver ligada) e avisa as janelas. Só baixa e
+//! instala quando a pessoa clica em "Atualizar": o instalador vem da release,
+//! com a assinatura conferida pela chave pública embutida no app
+//! (`plugins.updater.pubkey`), e roda em modo de atualização (sem a tela de
+//! desinstalar a versão anterior). Instalado pela Microsoft Store, quem
+//! atualiza é a Store: nada é consultado.
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -11,6 +14,7 @@ use larafim_runtimes::app_update::{self, REPO_URL};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::AppState;
 
@@ -30,6 +34,10 @@ pub struct UpdateStatus {
     pub error: Option<String>,
     /// Instalado pela Microsoft Store: as atualizações vêm de lá.
     pub store: bool,
+    /// Baixando/instalando a versão nova.
+    pub installing: bool,
+    /// Progresso do download (0–100), quando o servidor informa o tamanho.
+    pub progress: Option<u8>,
     /// Página da release (só deste repositório; validada em `parse_latest`).
     #[serde(skip)]
     pub url: Option<String>,
@@ -119,6 +127,85 @@ pub async fn app_update_check(app: AppHandle) -> UpdateStatus {
     check(&app).await
 }
 
+/// O instalador só pode vir das releases deste repositório. A assinatura já
+/// garante a origem; isto evita baixar qualquer coisa de outro lugar.
+fn is_release_asset(url: &str) -> bool {
+    let prefix = format!("{REPO_URL}/releases/download/");
+    url.starts_with(&prefix) && larafim_core::safety::is_https_url_on(url, &["github.com"]) && !url.contains("..")
+}
+
+fn set_installing(app: &AppHandle, installing: bool, progress: Option<u8>, error: Option<String>) {
+    {
+        let state = app.state::<UpdateState>();
+        let mut s = state.0.lock().unwrap();
+        s.installing = installing;
+        s.progress = progress;
+        if error.is_some() {
+            s.error = error;
+        }
+    }
+    let _ = app.emit("app:update", snapshot(app));
+}
+
+/// Botão "Atualizar e reiniciar": baixa o instalador da release, confere a
+/// assinatura e roda em modo de atualização. No Windows o app fecha sozinho
+/// antes do instalador começar e é reaberto por ele no fim.
+#[tauri::command]
+pub async fn app_update_install(app: AppHandle) -> Result<(), String> {
+    if crate::packaged::is_packaged() {
+        return Err(t!("instalado pela Microsoft Store: a Store atualiza o Larafim"));
+    }
+    if snapshot(&app).installing {
+        return Ok(());
+    }
+    set_installing(&app, true, None, None);
+    let result = install(&app).await;
+    if let Err(e) = &result {
+        tracing::warn!("atualização do Larafim falhou: {e}");
+        set_installing(&app, false, None, Some(e.clone()));
+    }
+    result
+}
+
+async fn install(app: &AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    let updater = app
+        .updater_builder()
+        // Antes do instalador: para PHP, bancos e o gateway como ao sair
+        // normalmente (o `exit` do plugin pula o RunEvent::Exit).
+        .on_before_exit(move || {
+            crate::server::shutdown(&handle);
+            handle.cleanup_before_exit();
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Err(t!("nenhuma versão nova encontrada"));
+    };
+    if !is_release_asset(update.download_url.as_str()) {
+        return Err(t!("link do instalador fora do repositório oficial"));
+    }
+    tracing::info!(version = update.version, "baixando a versão nova do Larafim");
+    let progress = app.clone();
+    let mut done: u64 = 0;
+    let mut last: Option<u8> = None;
+    update
+        .download_and_install(
+            move |chunk, total| {
+                done += chunk as u64;
+                let pct = total.filter(|t| *t > 0).map(|t| (done.saturating_mul(100) / t).min(100) as u8);
+                // Só avisa a interface quando o número muda.
+                if pct != last {
+                    last = pct;
+                    set_installing(&progress, true, pct, None);
+                }
+            },
+            || tracing::info!("download concluído; abrindo o instalador"),
+        )
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Abre um dos links fixos do projeto. A interface nunca manda uma URL:
 /// só o nome do link, e o endereço sai daqui.
 #[tauri::command]
@@ -135,4 +222,25 @@ pub fn open_project_link(app: AppHandle, kind: String) -> Result<(), String> {
         _ => return Err(t!("link desconhecido")),
     };
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_release_asset;
+
+    #[test]
+    fn instalador_so_das_releases_do_repositorio() {
+        assert!(is_release_asset("https://github.com/josevictoremiliano/larafim/releases/download/v0.1.3/Larafim_0.1.3_x64-setup.exe"));
+        for bad in [
+            "http://github.com/josevictoremiliano/larafim/releases/download/v0.1.3/a.exe",
+            "https://github.com/outra-pessoa/larafim/releases/download/v0.1.3/a.exe",
+            "https://github.com/josevictoremiliano/larafim-falso/releases/download/v1/a.exe",
+            "https://github.com/josevictoremiliano/larafim/releases/download/../../../x/a.exe",
+            "https://github.com.evil.example/josevictoremiliano/larafim/releases/download/v1/a.exe",
+            "https://evil.example/https://github.com/josevictoremiliano/larafim/releases/download/v1/a.exe",
+            "https://github.com/josevictoremiliano/larafim/archive/main.zip",
+        ] {
+            assert!(!is_release_asset(bad), "{bad}");
+        }
+    }
 }

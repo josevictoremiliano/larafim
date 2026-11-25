@@ -99,19 +99,9 @@ O Larafim é **só para Windows** por enquanto. Ele depende de partes do Windows
 Windows do PHP, do MariaDB e do PostgreSQL. Versões para macOS e Linux não estão descartadas, mas
 exigem portar essas partes. Veja a [arquitetura](docs/desenvolvimento/arquitetura.md#outras-plataformas).
 
-## Política de assinatura de código
+## Privacidade
 
-Assinatura de código gratuita fornecida pela [SignPath.io](https://about.signpath.io/), certificado
-da [SignPath Foundation](https://signpath.org/).
-
-- **Quem pode alterar o código e revisar:** os [membros do projeto](https://github.com/josevictoremiliano/larafim/graphs/contributors).
-  Contribuições de fora só entram por pull request revisado.
-- **Quem aprova cada assinatura:** [@josevictoremiliano](https://github.com/josevictoremiliano).
-- **O que é assinado:** só os arquivos compilados pelo workflow público de release
-  ([`release.yml`](.github/workflows/release.yml)) a partir de uma tag deste repositório. Nada
-  compilado fora do GitHub Actions é assinado.
-
-**Privacidade:** o Larafim não envia dados seus para nenhum servidor. Ele só se conecta à internet
+O Larafim não envia dados seus para nenhum servidor. Ele só se conecta à internet
 para baixar o que você pede (PHP, Node, bancos de dados e ferramentas, das fontes oficiais) e para
 ver se há versão nova do Larafim no GitHub. Essa última verificação pode ser desligada em
 *Configurações › Sobre › Verificar automaticamente*.

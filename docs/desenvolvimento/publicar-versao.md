@@ -23,11 +23,14 @@ enviada:
 
 1. confere se a tag bate com a `version` de `app/src-tauri/tauri.conf.json`;
 2. roda os testes de novo;
-3. `npx tauri build`, que gera o instalador NSIS;
-4. gera o `SHA256SUMS.txt`;
-5. cria a **atestação de origem** (*build provenance*) do instalador, que qualquer pessoa confere com
+3. confere se a chave pública do updater está no `tauri.conf.json`;
+4. `npx tauri build`, que gera o instalador NSIS e o `.sig` dele, assinado com a chave privada do
+   updater (veja [Atualização pelo app](#atualização-pelo-app));
+5. gera o `SHA256SUMS.txt` e o `latest.json`;
+6. cria a **atestação de origem** (*build provenance*) do instalador, que qualquer pessoa confere com
    `gh attestation verify`;
-6. publica a release com o instalador, o `SHA256SUMS.txt` e as notas (seção do `CHANGELOG.md` + como instalar + lista de PRs).
+7. publica a release com o instalador, o `.sig`, o `latest.json`, o `SHA256SUMS.txt` e as notas
+   (seção do `CHANGELOG.md` + como instalar + lista de PRs).
 
 ### Passo a passo
 
@@ -83,24 +86,46 @@ Não há builds para macOS e Linux. O app depende de partes do Windows (veja
 abriria, mas não conseguiria baixar nem rodar PHP, bancos ou domínios. Por isso o workflow só publica o
 instalador de Windows.
 
-## Assinatura de código (pendente)
+## Assinatura de código
 
-O instalador ainda não é assinado, por isso o SmartScreen avisa na primeira vez. O caminho escolhido
-é a **[SignPath Foundation](https://signpath.org)**, que assina de graça projetos open source. O
-certificado e a chave são deles, e o editor que aparece no Windows é "SignPath Foundation".
+O instalador **não é assinado** com certificado de código: os certificados reconhecidos pelo Windows
+são pagos. Por isso o SmartScreen avisa na primeira instalação, e a confiança vem do `SHA256SUMS.txt` e
+da atestação de origem. Na Microsoft Store não há aviso, porque a própria Store assina o pacote MSIX.
 
-1. **Política de assinatura** publicada no README (seção *Política de assinatura de código*). Eles a
-   leem ao analisar o pedido. Mantenha a lista de quem aprova assinaturas atualizada.
-2. **Pedido** pelo formulário do site da SignPath Foundation. A análise pode levar semanas.
-3. **Depois de aprovado:** o token de API da SignPath vai num *secret* do repositório (por exemplo
-   `SIGNPATH_API_TOKEN`), **nunca** no código. O ID da organização e os nomes do projeto e da
-   política de assinatura podem ficar no workflow.
-4. **No `release.yml`:** um passo com `signpath/github-action-submit-signing-request` envia o arquivo,
-   espera a aprovação no painel da SignPath e baixa o arquivo assinado. O ideal é assinar o
-   `larafim-app.exe` e o `larafim-shim.exe` antes do NSIS empacotar, e depois o instalador.
+Isto é diferente da assinatura das **atualizações** (abaixo), que é gratuita e já é usada.
 
-## Atualização automática (pendente)
+## Atualização pelo app
 
-O *updater* do Tauri exige um par de chaves de assinatura de atualizações. A chave privada fica num
-*secret* (`TAURI_SIGNING_PRIVATE_KEY`), e o arquivo `latest.json` é publicado na release. Fica para uma
-versão futura.
+O Larafim instalado pelo NSIS se atualiza quando a pessoa clica em *Atualizar e reiniciar*. Ele usa o
+*updater* do Tauri: lê o `latest.json` da última release (`releases/latest/download/latest.json`),
+baixa o instalador, confere a assinatura com a chave pública embutida (`plugins.updater.pubkey` no
+`tauri.conf.json`) e roda o instalador com `/P /UPDATE /R`: passivo, sem a tela de desinstalar a versão
+anterior, reabrindo o app no fim. Os *hooks* do instalador (`installer-hooks.nsh`) não mexem na chave
+de idioma do registro em modo de atualização.
+
+A assinatura usa um par de chaves **minisign**, gratuito, sem relação com certificado de código.
+
+### Configurar a chave (uma vez)
+
+1. Gere o par de chaves **fora do repositório**, com uma senha:
+
+   ```powershell
+   cd app
+   npx tauri signer generate -w "$env:USERPROFILE\.tauri\larafim.key"
+   ```
+
+2. Copie o conteúdo de `larafim.key.pub` para `plugins.updater.pubkey` em
+   `app/src-tauri/tauri.conf.json`, no lugar de `CHAVE_PUBLICA_DO_UPDATER`. A chave pública pode ir para
+   o repositório.
+3. Em *Settings › Secrets and variables › Actions* do repositório, crie:
+   - `TAURI_SIGNING_PRIVATE_KEY`: o conteúdo de `larafim.key`;
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: a senha.
+4. Guarde `larafim.key` e a senha num lugar seguro (gerenciador de senhas). **Sem essa chave não dá para
+   publicar atualizações para quem já tem o app**: trocar a chave obriga todo mundo a reinstalar pelo
+   instalador.
+
+Sem a chave pública ou sem o *secret*, o workflow de release falha antes de publicar.
+
+Para testar um build com updater na sua máquina, defina `TAURI_SIGNING_PRIVATE_KEY` (caminho ou
+conteúdo da chave) e `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` no terminal antes do `npx tauri build`.
+Arquivos `.env` não funcionam para isso.

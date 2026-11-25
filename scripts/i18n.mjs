@@ -112,21 +112,29 @@ if (cmd === "keys") {
   conf.bundle.windows.nsis.installerHooks = "./installer-hooks.nsh";
   writeFileSync(confPath, JSON.stringify(conf, null, 2) + "\n");
   const cases = langs
-    .map((l, i) => `  ${i ? "${ElseIf}" : "${If}"} $LANGUAGE == ${l.data._meta.langid}\n    StrCpy $0 "${l.code}"`)
+    .map((l, i) => `    ${i ? "${ElseIf}" : "${If}"} $LANGUAGE == ${l.data._meta.langid}\n      StrCpy $0 "${l.code}"`)
     .join("\n");
+  // $UpdateMode = 1 quando o próprio Larafim roda o instalador (/UPDATE): a
+  // tela de idioma não aparece e a desinstalação da versão antiga não pode
+  // apagar a chave.
   const nsh = `; Gerado por scripts/i18n.mjs sync — não edite à mão.
 ; Grava o idioma escolhido no instalador; o Larafim usa na primeira vez que abre.
+; Atualizações feitas pelo app ($UpdateMode = 1) não mexem na chave.
 !include "LogicLib.nsh"
 
 !macro NSIS_HOOK_POSTINSTALL
-  StrCpy $0 "${SOURCE}"
+  \${If} $UpdateMode <> 1
+    StrCpy $0 "${SOURCE}"
 ${cases}
+    \${EndIf}
+    WriteRegStr HKCU "Software\\Larafim" "Language" $0
   \${EndIf}
-  WriteRegStr HKCU "Software\\Larafim" "Language" $0
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  DeleteRegKey HKCU "Software\\Larafim"
+  \${If} $UpdateMode <> 1
+    DeleteRegKey HKCU "Software\\Larafim"
+  \${EndIf}
 !macroend
 `;
   writeFileSync(join(root, "app", "src-tauri", "installer-hooks.nsh"), nsh);

@@ -232,10 +232,14 @@
   {#if update?.available && update.latest && dismissedUpdate !== update.latest}
     <div class="newbar updatebar">
       <Glyph name="refresh" />
-      <span>{t("Versão {v} do Larafim disponível.", { v: update.latest })}</span>
-      <button class="btn accent" onclick={() => updates.openLink("update")}>{t("Baixar")}</button>
-      <button class="btn subtle" onclick={() => api.openSettings("about")}>{t("Detalhes")}</button>
-      <button class="btn subtle icon" title={t("Lembrar depois")} onclick={dismissUpdate}><Glyph name="close" size={12} /></button>
+      {#if update.installing}
+        <span>{update.progress === null ? t("Baixando a versão {v}…", { v: update.latest }) : t("Baixando a versão {v}… {p}%", { v: update.latest, p: update.progress })}</span>
+      {:else}
+        <span>{t("Versão {v} do Larafim disponível.", { v: update.latest })}</span>
+        <button class="btn accent" onclick={() => updates.install().catch((e) => (app.error = String(e)))}>{t("Atualizar e reiniciar")}</button>
+        <button class="btn subtle" onclick={() => api.openSettings("about")}>{t("Detalhes")}</button>
+        <button class="btn subtle icon" title={t("Lembrar depois")} onclick={dismissUpdate}><Glyph name="close" size={12} /></button>
+      {/if}
     </div>
   {/if}
 

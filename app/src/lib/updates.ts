@@ -12,6 +12,10 @@ export interface UpdateStatus {
   error: string | null;
   /** Instalado pela Microsoft Store: as atualizações vêm de lá. */
   store: boolean;
+  /** Baixando/instalando a versão nova (o app fecha e reabre sozinho). */
+  installing: boolean;
+  /** Progresso do download (0–100), quando se sabe o tamanho. */
+  progress: number | null;
 }
 
 /** Links fixos do projeto; o endereço sai do Rust, nunca da interface. */
@@ -26,6 +30,8 @@ let mockStatus: UpdateStatus = {
   checking: false,
   error: null,
   store: false,
+  installing: false,
+  progress: null,
 };
 
 const mock = {
@@ -42,6 +48,15 @@ const mock = {
     mockEmit("app:update", mockStatus);
     return { ...mockStatus };
   },
+  install: async (): Promise<void> => {
+    for (let p = 0; p <= 100; p += 20) {
+      mockStatus = { ...mockStatus, installing: true, progress: p };
+      mockEmit("app:update", mockStatus);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    mockStatus = { ...mockStatus, installing: false, progress: null };
+    mockEmit("app:update", mockStatus);
+  },
   openLink: async (link: ProjectLink) => void window.open(`https://github.com/#${link}`, "_blank"),
 };
 
@@ -49,6 +64,8 @@ export const updates = inTauri
   ? {
       status: () => invoke<UpdateStatus>("app_update_status"),
       check: () => invoke<UpdateStatus>("app_update_check"),
+      /** Baixa, confere a assinatura e instala; o app fecha e reabre. */
+      install: () => invoke<void>("app_update_install"),
       openLink: (kind: ProjectLink) => invoke<void>("open_project_link", { kind }),
     }
   : mock;

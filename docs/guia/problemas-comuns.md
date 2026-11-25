@@ -2,7 +2,7 @@
 
 ### "O Windows protegeu o computador" ao instalar
 
-O instalador ainda não tem assinatura de código. Confira o download
+O instalador não tem assinatura de código. Confira o download
 ([como](instalacao.md#conferir-o-download)) e use *Mais informações › Executar assim mesmo*.
 
 ### O projeto não abre no navegador ("não foi possível encontrar o endereço")

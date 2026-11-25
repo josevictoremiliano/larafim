@@ -171,9 +171,21 @@ pub fn ca_der(ca_cert_pem: &str) -> Result<Vec<u8>, TlsError> {
     rustls_pemfile_der(ca_cert_pem).map(|d| d.to_vec())
 }
 
+/// Criptografia do TLS, sempre a aws-lc-rs (a mesma que assina os
+/// certificados). Escolhida aqui e não pelo padrão do processo: outra
+/// dependência (o updater do Tauri) liga também a `ring` no rustls, e com as
+/// duas ligadas o rustls não sabe qual usar e entra em pânico.
+fn provider() -> Arc<rustls::crypto::CryptoProvider> {
+    Arc::new(rustls::crypto::aws_lc_rs::default_provider())
+}
+
 /// Configuração do servidor TLS (HTTP/1.1).
 pub fn server_config(resolver: Arc<SniResolver>) -> Arc<rustls::ServerConfig> {
-    let mut cfg = rustls::ServerConfig::builder().with_no_client_auth().with_cert_resolver(resolver);
+    let mut cfg = rustls::ServerConfig::builder_with_provider(provider())
+        .with_safe_default_protocol_versions()
+        .expect("a aws-lc-rs tem TLS 1.2 e 1.3")
+        .with_no_client_auth()
+        .with_cert_resolver(resolver);
     cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
     Arc::new(cfg)
 }
@@ -219,7 +231,11 @@ mod tests {
 
         let mut roots = rustls::RootCertStore::empty();
         roots.add(rustls_pemfile_der(&ca.cert).unwrap()).unwrap();
-        let client = rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
+        let client = rustls::ClientConfig::builder_with_provider(provider())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
         let connector = tokio_rustls::TlsConnector::from(Arc::new(client));
         let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
         let name = rustls::pki_types::ServerName::try_from("loja.offline").unwrap();

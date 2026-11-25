@@ -43,7 +43,7 @@ O instalador:
 
 ### Aviso do SmartScreen
 
-O instalador ainda não tem assinatura digital de código. Por isso o Windows pode mostrar
+O instalador não tem assinatura digital de código (o certificado é pago). Por isso o Windows pode mostrar
 "O Windows protegeu o computador". Confira o download como explicado acima e clique em
 *Mais informações › Executar assim mesmo*.
 
@@ -71,8 +71,15 @@ O Larafim avisa quando sai uma versão nova. Ele confere a última release do Gi
 ícone e em *Configurações › Sobre*. Lá também ficam o botão **Verificar atualizações** e a opção de
 desligar a verificação automática.
 
-O aviso só leva à página da release: baixe o instalador novo, confira o download e rode por cima.
-Configurações, projetos e bancos são mantidos.
+Para atualizar, clique em **Atualizar e reiniciar** (na barra do topo, em *Configurações › Sobre* ou
+no painel da bandeja). O Larafim baixa o instalador da release, confere a assinatura, fecha, instala a
+versão nova e abre de novo sozinho, sem perguntar nada no caminho. Configurações, projetos e bancos são
+mantidos. Nada é baixado sem esse clique.
+
+Se preferir, baixe o instalador na página da release (botão **Novidades**) e rode por cima.
+
+> A atualização pelo app existe a partir da v0.1.3. Quem está na v0.1.2 ou antes instala a v0.1.3 pelo
+> instalador uma última vez.
 
 ## Desinstalar
 

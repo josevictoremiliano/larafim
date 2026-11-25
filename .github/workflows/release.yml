@@ -68,10 +68,26 @@ jobs:
           cargo build -p larafim-shim --release --locked
           cargo test --workspace --locked
 
+      # A chave pública do updater precisa estar no tauri.conf.json, senão
+      # o app publicado não consegue conferir as próximas atualizações.
+      - name: Chave do updater configurada
+        shell: pwsh
+        run: |
+          $pubkey = (Get-Content app/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).plugins.updater.pubkey
+          if (-not $pubkey -or $pubkey -eq "CHAVE_PUBLICA_DO_UPDATER") {
+            Write-Error "plugins.updater.pubkey não configurada (veja docs/desenvolvimento/publicar-versao.md)"
+            exit 1
+          }
+
       # `tauri build` roda o beforeBuildCommand (traduções do instalador,
-      # larafim-shim e interface) e gera o instalador NSIS.
+      # larafim-shim e interface) e gera o instalador NSIS. Com a chave
+      # privada do updater ele também gera o `.sig` do instalador, que o app
+      # confere antes de atualizar.
       - name: Compilar o instalador
         working-directory: app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build
 
       # Pacote da Microsoft Store, sem assinatura (a Store assina). Não vai
@@ -98,6 +114,34 @@ jobs:
           "$hash  $($exe.Name)" | Out-File -Encoding ascii "$dir/SHA256SUMS.txt"
           "installer=$($exe.FullName)" >> $env:GITHUB_OUTPUT
           "sums=$((Resolve-Path "$dir/SHA256SUMS.txt").Path)" >> $env:GITHUB_OUTPUT
+
+      # latest.json: o que o Larafim instalado consulta para se atualizar
+      # (releases/latest/download/latest.json). Aponta para o instalador
+      # desta release e leva a assinatura do `.sig`.
+      - name: Manifesto de atualização
+        id: updater
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.files.outputs.installer }}
+        run: |
+          $sig = "$env:INSTALLER.sig"
+          if (-not (Test-Path $sig)) { Write-Error "assinatura do updater não gerada: $sig (secret TAURI_SIGNING_PRIVATE_KEY?)"; exit 1 }
+          $name = Split-Path -Leaf $env:INSTALLER
+          $manifest = [ordered]@{
+            version   = $env:TAG.TrimStart('v')
+            notes     = "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:TAG"
+            pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = (Get-Content $sig -Raw).Trim()
+                url       = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG/$name"
+              }
+            }
+          }
+          $out = Join-Path (Split-Path $env:INSTALLER) "latest.json"
+          $manifest | ConvertTo-Json -Depth 5 | Out-File -Encoding utf8NoBOM $out
+          "sig=$sig" >> $env:GITHUB_OUTPUT
+          "manifest=$out" >> $env:GITHUB_OUTPUT
 
       - name: Atestação de origem
         uses: actions/attest-build-provenance@v4
@@ -134,7 +178,8 @@ jobs:
             "   # $hash",
             "   gh attestation verify .\$exe --repo $env:GITHUB_REPOSITORY",
             '   ```',
-            '3. Rode o instalador. Ele instala só para o seu usuário, sem administrador.', ''
+            '3. Rode o instalador. Ele instala só para o seu usuário, sem administrador.',
+            '', 'Já tem o Larafim? Ele mesmo se atualiza: *Configurações › Sobre › Atualizar e reiniciar*.', ''
           )
           ($section + $install) -join "`n" | Out-File -Encoding utf8 notes.md
           "path=$((Resolve-Path notes.md).Path)" >> $env:GITHUB_OUTPUT
@@ -150,3 +195,5 @@ jobs:
           files: |
             ${{ steps.files.outputs.installer }}
             ${{ steps.files.outputs.sums }}
+            ${{ steps.updater.outputs.sig }}
+            ${{ steps.updater.outputs.manifest }}

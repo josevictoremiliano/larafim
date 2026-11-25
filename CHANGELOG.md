@@ -3,6 +3,23 @@
 As versões do Larafim e o que mudou em cada uma. O instalador de cada versão fica em
 [Releases](https://github.com/josevictoremiliano/larafim/releases).
 
+## v0.1.3
+
+### Novidades
+
+- **Atualização pelo próprio app:** *Atualizar e reiniciar* baixa a versão nova, confere a assinatura,
+  instala sem a tela de desinstalar a versão anterior e reabre o Larafim. Quem está na v0.1.2 instala
+  esta versão pelo instalador uma última vez.
+
+### Correções
+
+- O `php.ini` das versões de PHP instaladas é consertado ao abrir o app quando a pasta de dados mudou
+  de lugar (antes as extensões deixavam de carregar).
+
+### Outras mudanças
+
+- Removida do README a política de assinatura de código da SignPath, que não chegou a ser usada.
+
 ## v0.1.2
 
 ### Novidades

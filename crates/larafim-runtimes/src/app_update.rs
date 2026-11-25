@@ -1,5 +1,6 @@
 //! Versões novas do próprio Larafim, pela última release publicada no GitHub.
-//! Só avisa e leva à página da release: nada é baixado nem executado sozinho.
+//! Aqui só se descobre a versão; baixar e instalar fica com o updater do
+//! Tauri (app/src-tauri/src/updates.rs), e só quando a pessoa pede.
 
 use larafim_core::t;
 use serde::Serialize;

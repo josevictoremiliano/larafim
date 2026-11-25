@@ -1,6 +1,6 @@
 # Política de privacidade · Privacy policy
 
-*Última atualização / Last updated: 2026-11-23*
+*Última atualização / Last updated: 2026-11-24*
 
 [Português](#português) · [English](#english)
 
@@ -20,7 +20,8 @@ guarda em servidores e não compartilha** dados pessoais.
 Só para baixar o que você pede, direto das fontes oficiais: PHP (php.net), Node.js (nodejs.org),
 MariaDB (mariadb.org), Composer (getcomposer.org), Xdebug (xdebug.org) e ferramentas publicadas no
 GitHub (github.com). Na versão instalada fora da Microsoft Store, ele também consulta o GitHub para
-saber se há uma versão nova do Larafim. Essa verificação pode ser desligada em
+saber se há uma versão nova do Larafim e, quando você clica em *Atualizar e reiniciar*, baixa de lá o
+instalador novo. A verificação pode ser desligada em
 *Configurações › Sobre › Verificar automaticamente*. Nesses acessos, os servidores recebem apenas o
 que qualquer download recebe (como o endereço IP), sob as políticas de privacidade de cada site.
 
@@ -50,7 +51,8 @@ servers or share** personal data.
 Only to download what you ask for, straight from the official sources: PHP (php.net), Node.js
 (nodejs.org), MariaDB (mariadb.org), Composer (getcomposer.org), Xdebug (xdebug.org) and tools
 published on GitHub (github.com). When installed outside the Microsoft Store, it also checks GitHub
-for a new Larafim release. That check can be turned off in *Settings › About › Check automatically*.
+for a new Larafim release and, when you click *Update and restart*, downloads the new installer from
+there. The check can be turned off in *Settings › About › Check automatically*.
 These servers only receive what any download sends (such as your IP address), under each site's own
 privacy policy.
 
