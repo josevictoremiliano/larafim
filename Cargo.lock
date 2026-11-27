@@ -2290,7 +2290,7 @@ dependencies = [
 
 [[package]]
 name = "larafim-app"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.23.1",
  "larafim-core",
@@ -2313,7 +2313,7 @@ dependencies = [
 
 [[package]]
 name = "larafim-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "dirs",
  "serde",
@@ -2328,7 +2328,7 @@ dependencies = [
 
 [[package]]
 name = "larafim-runtimes"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "hex",
  "larafim-core",
@@ -2346,7 +2346,7 @@ dependencies = [
 
 [[package]]
 name = "larafim-server"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bytes",
  "futures-util",
@@ -2371,7 +2371,7 @@ dependencies = [
 
 [[package]]
 name = "larafim-shim"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "larafim-core",
  "larafim-runtimes",

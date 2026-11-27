@@ -3,6 +3,14 @@
 As versões do Larafim e o que mudou em cada uma. O instalador de cada versão fica em
 [Releases](https://github.com/josevictoremiliano/larafim/releases).
 
+## v0.1.5
+
+### Correções
+
+- **Atualizar e reiniciar** não instalava nada: o app fechava a tarefa antes de abrir o instalador e
+  continuava na versão antiga. Quem está na v0.1.3 ou v0.1.4 instala esta versão pelo instalador uma
+  vez; daqui para frente a atualização pelo app funciona.
+
 ## v0.1.4
 
 ### Correções

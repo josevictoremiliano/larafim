@@ -173,8 +173,12 @@ async fn install(app: &AppHandle) -> Result<(), String> {
         .updater_builder()
         // Antes do instalador: para PHP, bancos e o gateway como ao sair
         // normalmente (o `exit` do plugin pula o RunEvent::Exit).
+        // Numa thread à parte: aqui ainda estamos dentro do runtime async, e o
+        // `block_on` do shutdown daria panic, matando a tarefa antes de abrir o
+        // instalador (a atualização da v0.1.3 nunca chegava a instalar).
         .on_before_exit(move || {
-            crate::server::shutdown(&handle);
+            let h = handle.clone();
+            let _ = std::thread::spawn(move || crate::server::shutdown(&h)).join();
             handle.cleanup_before_exit();
         })
         .build()
