@@ -43,12 +43,30 @@ Detecção em `app/src-tauri/src/packaged.rs`.
 
 ## Capacidades restritas: justificativa no envio
 
-No Partner Center, em *Pacotes › Submission options › Restricted capabilities*, cole:
+Na submissão, a seção *Funcionalidades restritas* tem uma caixa por capacidade, com **limite de 500
+caracteres**. Cole cada bloco abaixo na caixa correspondente. A explicação completa (por que, alternativas,
+caminhos gravados, proteções, suporte e garantia) fica em [CAPABILITIES.md](CAPABILITIES.md), que os
+textos linkam no `main`: ele precisa estar no GitHub antes do envio.
 
-> Larafim is a local development tool (PHP, Node.js and databases for web projects).
-> **unvirtualizedResources**: it installs PHP/Node runtimes under %LOCALAPPDATA%\Larafim and adds
-> their command-line shims to the user's PATH (HKCU\Environment). Both must be the real locations,
-> because the user's own terminal, which runs outside the package, needs to find them.
-> **allowElevation**: only to add the app's own block of `127.0.0.1 <project>.offline` lines to the
-> Windows hosts file, after the user confirms the UAC prompt. Nothing else runs elevated.
-> **runFullTrust**: desktop app (Tauri/WebView2) that starts local web servers for the user's projects.
+A primeira versão foi recusada no envio da 0.1.2 (política 10.6.3, "forneça informações novas ou
+ampliadas"). Se mudar o comportamento do hosts, do PATH ou da pasta de dados, atualize os dois arquivos.
+
+### runFullTrust
+
+```text
+Open-source dev tool (Tauri/WebView2) that installs PHP, Node.js and databases and runs them as local processes (PHP-FastCGI, MariaDB, PostgreSQL, Redis, Mailpit) plus an HTTP gateway on 127.0.0.1 only. Needs a full-trust Win32 process. Details: https://github.com/josevictoremiliano/larafim/blob/main/packaging/msix/CAPABILITIES.md
+```
+
+### unvirtualizedResources
+
+```text
+The user's terminal runs outside the package and must find the PHP/Node Larafim installs. Writes go ONLY to %LOCALAPPDATA%\Larafim and, if the user opts in (off by default), one entry %LOCALAPPDATA%\Larafimin in HKCU\Environment Path. No HKLM. Alternatives, safeguards, support: https://github.com/josevictoremiliano/larafim/blob/main/packaging/msix/CAPABILITIES.md
+I confirm it is used only for this and writes only to these paths.
+```
+
+### allowElevation
+
+```text
+Only to add "127.0.0.1 <project>.offline" lines to the hosts file, after the user accepts UAC. Writes ONLY Larafim's own block in etc\hosts plus a one-time hosts.larafim-backup. Names are validated twice (also in the helper); IP is always 127.0.0.1. Main app never elevated. Alternatives, safeguards, support: https://github.com/josevictoremiliano/larafim/blob/main/packaging/msix/CAPABILITIES.md
+I confirm it is used only for this and writes only to these paths.
+```

@@ -3,6 +3,20 @@
 As versões do Larafim e o que mudou em cada uma. O instalador de cada versão fica em
 [Releases](https://github.com/josevictoremiliano/larafim/releases).
 
+## v0.1.4
+
+### Correções
+
+- **Janela branca ao abrir pela bandeja:** com *Iniciar com o Windows* ligado, *Abrir Larafim* no painel
+  da bandeja deixava a janela em branco e o app travado. Agora a janela abre normalmente.
+- **Desligar todos** desliga também os bancos (MariaDB, PostgreSQL), o Redis e o PHP, deixando o
+  servidor parado de fato.
+
+### Outras mudanças
+
+- O seletor de banco do projeto separa o que é só do projeto, o que é compartilhado entre projetos e os
+  servidores existentes.
+
 ## v0.1.3
 
 ### Novidades

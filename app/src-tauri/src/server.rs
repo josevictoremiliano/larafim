@@ -499,6 +499,14 @@ pub async fn stop_all(app: &AppHandle) {
         store.projects.iter_mut().for_each(|p| p.online = false);
         let _ = store.save(&state.paths.projects_file());
     }
+    // Bancos e Redis seguram o gateway (Adminer) e o PHP ligados mesmo sem
+    // projeto online; "Desligar todos" tem que desligar o servidor de fato.
+    app.state::<crate::services::ServicesState>().maria.stop().await;
+    crate::services::stop_all_own(app).await;
+    app.state::<crate::pg::PgState>().svc.stop().await;
+    crate::redis::stop_redis(app).await;
+    app.state::<ServerState>().pools.stop_all().await;
+    let _ = app.emit("services-changed", ());
     let _ = refresh(app).await;
     notify_projects(app);
 }

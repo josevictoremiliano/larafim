@@ -174,8 +174,11 @@ pub fn tray_fit(app: AppHandle, height: f64) {
 }
 
 /// Ações do painel que não têm comando próprio. O painel some em seguida.
+/// `async` de propósito: comando síncrono roda na thread principal, e criar
+/// uma janela ali trava o WebView2 no Windows (janela branca, app congelado).
+/// Acontecia ao abrir pela bandeja depois de iniciar com o Windows (`--tray`).
 #[tauri::command]
-pub fn tray_action(app: AppHandle, action: String) {
+pub async fn tray_action(app: AppHandle, action: String) {
     if let Some(w) = app.get_webview_window(TRAY_WINDOW) {
         hide(&w);
     }

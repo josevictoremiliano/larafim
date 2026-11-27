@@ -170,17 +170,29 @@
     <div class="select">
       <select value={current} disabled={busy} onchange={(e) => choose(e.currentTarget.value as DbKind)}>
         <option value="none">{t("Não gerenciado")}</option>
-        <option value="sqlite">SQLite</option>
-        <option value="mariadb">{t("MariaDB compartilhado")}</option>
-        <option value="mariadb-own">{t("MariaDB próprio do projeto")}</option>
-        <option value="postgres">PostgreSQL</option>
-        {#each connections as c (c.id)}
-          <option value={`external:${c.id}`}>{c.name}</option>
-        {/each}
+        <!-- Grupos deixam claro quem divide o servidor com outros projetos. -->
+        <optgroup label={t("Só deste projeto")}>
+          <option value="sqlite">{t("SQLite (arquivo no projeto)")}</option>
+          <option value="mariadb-own">{t("MariaDB próprio")}</option>
+        </optgroup>
+        <optgroup label={t("Compartilhado entre projetos")}>
+          <option value="mariadb">MariaDB</option>
+          <option value="postgres">PostgreSQL</option>
+        </optgroup>
+        {#if connections.length}
+          <optgroup label={t("Servidores existentes")}>
+            {#each connections as c (c.id)}
+              <option value={`external:${c.id}`}>{c.name}</option>
+            {/each}
+          </optgroup>
+        {/if}
       </select>
     </div>
   {/key}
 </div>
+{#if current === "mariadb" || current === "postgres"}
+  <p class="caption hint">{t("Servidor compartilhado com outros projetos; este projeto usa um banco só dele.")}</p>
+{/if}
 {#if external}
   <p class="caption hint">{external.kind === "mysql" ? "MySQL" : "MariaDB"} · {external.user}@{external.host}:{external.port}</p>
 {/if}

@@ -63,7 +63,8 @@ Cada comando tem até 10 minutos para terminar.
 ## Online e offline
 
 O interruptor **Online** liga o projeto no endereço dele. Projetos online voltam sozinhos quando o
-Larafim abre. **Desligar todos** fica na barra de status e no menu da bandeja.
+Larafim abre. **Desligar todos** fica na barra de status e no menu da bandeja: desliga os projetos e
+também os bancos (MariaDB, PostgreSQL), o Redis e o PHP, deixando o servidor parado.
 
 Como funciona por baixo:
 
